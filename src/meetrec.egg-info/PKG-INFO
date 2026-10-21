@@ -1,0 +1,16 @@
+Metadata-Version: 2.4
+Name: meetrec
+Version: 0.1.0
+Summary: Personal meeting recorder: screen + mic + system audio, who-said-what transcript with overlap handling
+Requires-Python: >=3.10
+Requires-Dist: numpy
+Requires-Dist: sherpa-onnx
+Requires-Dist: faster-whisper
+Requires-Dist: certifi
+Requires-Dist: av<17
+Provides-Extra: capture
+Requires-Dist: soundcard; extra == "capture"
+Provides-Extra: mac
+Requires-Dist: catap; sys_platform == "darwin" and extra == "mac"
+Provides-Extra: gui
+Requires-Dist: PySide6; extra == "gui"

@@ -22,7 +22,7 @@ Temuan dan batasan terukur: [docs/FINDINGS.md](docs/FINDINGS.md).
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e .
-meetrec transcribe <folder berisi mic.wav + system.wav> --lang id --model small
+meetrec transcribe <folder berisi mic.wav + system.wav> --lang id
 ```
 
 `mic.wav` = suara kamu (selalu "Me"). `system.wav` = suara peserta lain; diarization hanya jalan di file ini.
@@ -30,3 +30,5 @@ Format WAV: 16 kHz, mono, 16-bit. Model diarization diunduh otomatis ke `~/.meet
 model Whisper diunduh oleh `faster-whisper`.
 
 Uji dengan `testdata/` (suara TTS sintetis, kebenaran di `testdata/truth.md`).
+
+Model Whisper default `small` (muat di RAM 8 GB). Untuk akurasi lebih tinggi di mesin yang RAM-nya lega: `--model large-v3-turbo` (±2 GB RAM).

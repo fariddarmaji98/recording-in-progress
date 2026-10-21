@@ -30,7 +30,7 @@ def main() -> None:
     t = sub.add_parser("transcribe", help="mic.wav + system.wav in a folder -> transcript.md/json")
     t.add_argument("folder", type=Path)
     t.add_argument("--lang", default="id", help="Whisper language code, 'auto' to detect")
-    t.add_argument("--model", default="large-v3-turbo")
+    t.add_argument("--model", default="small")
     t.add_argument("--speakers", type=int, default=-1, help="remote speaker count, -1 = auto")
     t.add_argument("--threshold", type=float, default=0.3, help="auto-count clustering threshold; lower = more speakers")
     a = p.parse_args()

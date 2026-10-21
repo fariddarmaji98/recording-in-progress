@@ -1,0 +1,16 @@
+numpy
+sherpa-onnx
+faster-whisper
+certifi
+av<17
+
+[capture]
+soundcard
+
+[gui]
+PySide6
+
+[mac]
+
+[mac:sys_platform == "darwin"]
+catap

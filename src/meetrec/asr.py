@@ -11,7 +11,7 @@ class Word:
     end: float
 
 
-def transcribe(wav: str | Path, language: str | None = "id", model: str = "large-v3-turbo",
+def transcribe(wav: str | Path, language: str | None = "id", model: str = "small",
                compute_type: str = "int8", vad: bool = True) -> list[Word]:
     """Word-level transcript. CPU int8 by default so it fits an 8 GB laptop."""
     m = WhisperModel(model, device="auto", compute_type=compute_type)
