@@ -1,0 +1,25 @@
+# mixed.wav emb=3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx num_clusters=3 thr=0.5 took 33.21s
+speaker_00   0.03  11.86
+speaker_01   7.96  15.61
+speaker_02  12.47  20.70
+n_speakers_found: 3
+simultaneous-different-speaker regions: [('spk0', 'spk1', 7.96, 11.86), ('spk1', 'spk2', 12.47, 15.61)]
+cluster -> seconds inside true speaker span: {'spk0': {'A': 11.7, 'B': 3.9}, 'spk1': {'A': 3.7, 'B': 7.6, 'C': 3.1}, 'spk2': {'B': 3.2, 'C': 8.1}}
+       33.94 real        17.26 user         1.56 sys
+           150962176  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               61485  page reclaims
+                 576  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                  88  voluntary context switches
+               99117  involuntary context switches
+         73620330585  instructions retired
+         29262982895  cycles elapsed
+           191285056  peak memory footprint

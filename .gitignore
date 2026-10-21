@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+/recordings/
+spike/**/.venv/
+spike/**/models/
+*.onnx
+*.bin
+hf_cache/
+out/*.part
+pip.log
+*.err

@@ -1,0 +1,25 @@
+# mixed.wav emb=wespeaker_en_voxceleb_resnet34_LM.onnx num_clusters=-1 thr=0.4 took 30.66s
+speaker_00   0.03  15.61
+speaker_01   7.96  11.86
+speaker_01  12.47  20.70
+n_speakers_found: 2
+simultaneous-different-speaker regions: [('spk0', 'spk1', 7.96, 11.86), ('spk0', 'spk1', 12.47, 15.61)]
+cluster -> seconds inside true speaker span: {'spk0': {'A': 11.7, 'B': 7.6, 'C': 3.1}, 'spk1': {'A': 3.7, 'B': 7.1, 'C': 8.1}}
+       31.35 real        18.50 user         1.11 sys
+           126763008  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               40482  page reclaims
+                 574  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                 150  voluntary context switches
+               83224  involuntary context switches
+         78430103260  instructions retired
+         29658382589  cycles elapsed
+           124880576  peak memory footprint

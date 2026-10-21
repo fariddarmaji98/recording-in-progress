@@ -1,0 +1,27 @@
+MODEL large-v3-turbo LOAD_SEC 11.3 maxrss_MB_after_load 480
+
+=== mic.wav lang=id vad=True dur=21.0s proc=121.1s RTF=5.77 WER=0.00 (ref 26 words)
+TEXT: Saya tidak setuju dengan usulan itu. Biaya server akan naik dua kali lipat, dan kita belum punya data pengguna yang cukup untuk membenarkan pengeluaran sebesar itu.
+WORDS: Saya[0.00-0.34] tidak[0.34-0.72] setuju[0.72-1.36] dengan[1.36-1.68] usulan[1.68-2.18] itu.[2.18-2.54] Biaya[2.84-3.30] server[3.30-3.70] akan[3.70-4.14] naik[4.14-4.48] dua[4.48-4.70] kali[4.70-5.06] lipat,[5.06-5.58] dan[5.70-5.98] kita[5.98-6.32] belum[6.32-6.72] punya[6.72-7.10] data[7.10-7.46] pengguna[7.46-8.00] yang[8.00-8.28] cukup[8.28-8.82] untuk[8.82-9.16] membenarkan[9.16-9.88] pengeluaran[9.88-10.68] sebesar[10.68-11.26] itu.[11.26-11.58]
+
+=== mic.wav lang=id vad=False dur=21.0s proc=135.1s RTF=6.43 WER=0.00 (ref 26 words)
+TEXT: Saya tidak setuju dengan usulan itu. Biaya server akan naik dua kali lipat, dan kita belum punya data pengguna yang cukup untuk membenarkan pengeluaran sebesar itu.
+WORDS: Saya[0.00-0.34] tidak[0.34-0.72] setuju[0.72-1.36] dengan[1.36-1.66] usulan[1.66-2.18] itu.[2.18-2.54] Biaya[2.84-3.30] server[3.30-3.70] akan[3.70-4.14] naik[4.14-4.46] dua[4.46-4.70] kali[4.70-5.06] lipat,[5.06-5.56] dan[5.68-5.98] kita[5.98-6.32] belum[6.32-6.72] punya[6.72-7.10] data[7.10-7.46] pengguna[7.46-8.00] yang[8.00-8.28] cukup[8.28-8.82] untuk[8.82-9.16] membenarkan[9.16-9.86] pengeluaran[9.86-10.68] sebesar[10.68-11.26] itu.[11.26-11.58]
+
+=== system.wav lang=en vad=True dur=21.0s proc=136.9s RTF=6.52 WER=0.00 (ref 50 words)
+TEXT: But the cost is justified. Without the new cluster, the checkout page will keep timing out during every sale, and customers will simply leave. I think both of you are missing the point. We should measure first, then decide. Let us run a one-week load test before spending anything.
+WORDS: But[7.63-8.11] the[8.11-8.25] cost[8.25-8.53] is[8.53-8.71] justified.[8.71-9.29] Without[9.65-9.97] the[9.97-10.25] new[10.25-10.41] cluster,[10.41-10.81] the[10.93-11.03] checkout[11.03-11.35] page[11.35-11.77] will[11.77-11.95] keep[11.95-12.21] timing[12.21-12.53] out[12.53-12.83] during[12.83-12.97] every[12.97-13.31] sale,[13.31-13.81] and[13.85-14.17] customers[14.17-14.71] will[14.71-15.03] simply[15.03-15.33] leave.[15.33-15.57] I[15.57-15.57] think[15.57-15.57] both[15.57-15.57] of[15.57-15.57] you[15.57-15.57] are[15.57-15.57] missing[15.57-15.57] the[15.57-15.57] point.[15.57-15.57] We[15.57-15.57] should[15.57-15.57] measure[15.57-15.57] first,[15.57-15.99] then[16.29-16.45] decide.[16.45-16.93] Let[17.25-17.49] us[17.49-17.69] run[17.69-17.89] a[17.89-18.05] one[18.05-18.27] -week[18.27-18.51] load[18.51-18.77] test[18.77-19.11] before[19.11-19.39] spending[19.39-19.85] anything.[19.85-20.35]
+
+=== system.wav lang=en vad=False dur=21.0s proc=115.3s RTF=5.49 WER=0.48 (ref 50 words)
+TEXT: I think both of you are missing the point. We should measure first. Then decide. Let us run a one-week load test before spending anything.
+WORDS: I[11.86-12.34] think[12.34-12.82] both[12.82-13.30] of[13.30-13.32] you[13.32-13.52] are[13.52-13.60] missing[13.60-13.84] the[13.84-14.06] point.[14.06-14.44] We[14.68-14.88] should[14.88-15.06] measure[15.06-15.40] first.[15.40-15.98] Then[16.22-16.44] decide.[16.44-16.88] Let[17.26-17.48] us[17.48-17.70] run[17.70-17.90] a[17.90-18.06] one[18.06-18.26] -week[18.26-18.52] load[18.52-18.76] test[18.76-19.10] before[19.10-19.40] spending[19.40-19.86] anything.[19.86-20.34]
+
+=== mixed.wav lang=en vad=True dur=21.0s proc=118.7s RTF=5.65 WER=0.51 (ref 76 words)
+TEXT: But the cost is justified. Without the new cluster, the checkout page will keep timing out during every sale, and customers will simply leave. Then decide. Let us run a one-week load test before spending anything.
+WORDS: But[5.30-5.94] the[5.94-6.28] cost[6.28-8.56] is[8.56-8.76] justified.[8.76-9.24] Without[9.48-9.48] the[9.48-10.26] new[10.26-10.44] cluster,[10.44-10.78] the[10.96-11.02] checkout[11.02-11.28] page[11.28-11.80] will[11.80-11.96] keep[11.96-12.16] timing[12.16-12.54] out[12.54-12.88] during[12.88-13.00] every[13.00-13.40] sale,[13.40-13.98] and[13.98-14.20] customers[14.20-14.68] will[14.68-15.02] simply[15.02-15.36] leave.[15.36-15.56] Then[16.18-16.42] decide.[16.42-16.94] Let[17.30-17.48] us[17.48-17.70] run[17.70-17.90] a[17.90-18.06] one[18.06-18.26] -week[18.26-18.48] load[18.48-18.78] test[18.78-19.10] before[19.10-19.40] spending[19.40-19.86] anything.[19.86-20.26]
+
+=== mixed.wav lang=en vad=False dur=21.0s proc=140.5s RTF=6.69 WER=0.51 (ref 76 words)
+TEXT: But the cost is justified. Without the new cluster, the checkout page will keep timing out during every sale, and customers will simply leave. Then decide. Let us run a one-week load test before spending anything.
+WORDS: But[5.30-5.94] the[5.94-6.28] cost[6.28-8.56] is[8.56-8.76] justified.[8.76-9.24] Without[9.48-9.48] the[9.48-10.26] new[10.26-10.44] cluster,[10.44-10.78] the[10.96-11.02] checkout[11.02-11.28] page[11.28-11.80] will[11.80-11.96] keep[11.96-12.16] timing[12.16-12.54] out[12.54-12.88] during[12.88-13.00] every[13.00-13.40] sale,[13.40-13.98] and[13.98-14.20] customers[14.20-14.68] will[14.68-15.02] simply[15.02-15.36] leave.[15.36-15.56] Then[16.18-16.42] decide.[16.42-16.94] Let[17.30-17.48] us[17.48-17.70] run[17.70-17.90] a[17.90-18.06] one[18.06-18.26] -week[18.26-18.48] load[18.48-18.78] test[18.78-19.10] before[19.10-19.40] spending[19.40-19.86] anything.[19.86-20.26]
+
+PEAK_RSS_MB_total 480

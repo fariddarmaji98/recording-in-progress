@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "meetrec"
+version = "0.1.0"
+description = "Personal meeting recorder: screen + mic + system audio, who-said-what transcript with overlap handling"
+requires-python = ">=3.10"
+dependencies = ["numpy", "sherpa-onnx", "faster-whisper", "certifi", "av<17"]
+
+[project.optional-dependencies]
+capture = ["soundcard"]
+mac = ["catap; sys_platform == 'darwin'"]
+gui = ["PySide6"]
+
+[project.scripts]
+meetrec = "meetrec.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

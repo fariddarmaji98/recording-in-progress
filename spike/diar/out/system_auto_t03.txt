@@ -1,0 +1,24 @@
+# system.wav emb=wespeaker_en_voxceleb_resnet34_LM.onnx num_clusters=-1 thr=0.3 took 31.22s
+speaker_00   7.98  15.59
+speaker_02  12.47  20.67
+n_speakers_found: 2
+simultaneous-different-speaker regions: [('spk0', 'spk2', 12.47, 15.59)]
+cluster -> seconds inside true speaker span: {'spk0': {'B': 7.6, 'C': 3.1}, 'spk2': {'B': 3.2, 'C': 8.1}}
+       31.84 real        19.04 user         1.08 sys
+           121421824  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               37245  page reclaims
+                 286  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                  96  voluntary context switches
+               87047  involuntary context switches
+         81317376259  instructions retired
+         30478540846  cycles elapsed
+           123668160  peak memory footprint
