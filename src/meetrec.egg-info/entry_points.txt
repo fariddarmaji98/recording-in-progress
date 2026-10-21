@@ -1,2 +1,5 @@
 [console_scripts]
 meetrec = meetrec.cli:main
+
+[gui_scripts]
+meetrec-ui = meetrec.ui:run

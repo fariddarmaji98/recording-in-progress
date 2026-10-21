@@ -80,10 +80,21 @@ def cmd_transcribe(a: argparse.Namespace) -> None:
     print(out)
 
 
+def cmd_ui(_: argparse.Namespace) -> None:
+    from .ui import run
+
+    run()
+
+
 def main() -> None:
+    import sys
+
+    if len(sys.argv) == 1:
+        return cmd_ui(argparse.Namespace())  # plain `meetrec` opens the floating panel
     p = argparse.ArgumentParser(prog="meetrec")
     sub = p.add_subparsers(dest="cmd", required=True)
 
+    sub.add_parser("ui", help="buka panel mengambang (default kalau tanpa argumen)").set_defaults(fn=cmd_ui)
     sub.add_parser("devices", help="daftar mikrofon dan speaker").set_defaults(fn=cmd_devices)
 
     r = sub.add_parser("record", help="rekam mic + suara sistem (dua file terpisah)")

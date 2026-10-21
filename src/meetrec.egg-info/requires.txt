@@ -4,12 +4,11 @@ certifi
 soundfile
 soxr
 soundcard
+PySide6
 
 [:sys_platform == "darwin"]
 catap
-
-[gui]
-PySide6
+pyobjc-framework-Quartz
 
 [transcribe]
 faster-whisper

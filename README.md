@@ -4,8 +4,8 @@ Perekam meeting pribadi (alternatif rekaman Meet berbayar). Merekam **apa yang m
 (mic + suara yang diputar sistem), tanpa API Zoom / Meet / Teams, jadi jalan untuk aplikasi apa pun.
 Python, target Windows / Linux / macOS.
 
-**Status: WIP.** Jalan: rekam audio, timeline per pembicara (termasuk overlap), potong per pembicara per section.
-Belum ada: rekam layar, coret-coret layar.
+**Status: WIP.** Jalan: panel mengambang (rekam audio, jeda, coret-coret layar), timeline per pembicara (termasuk overlap),
+potong per pembicara per section. Belum ada: rekam video layar.
 
 ## Cara kerja
 
@@ -32,7 +32,25 @@ python3 -m venv .venv
 Linux: butuh `libpulse` (PulseAudio atau `pipewire-pulse`). macOS: izinkan **Microphone** dan
 **Screen & System Audio Recording** untuk aplikasi terminal yang kamu pakai.
 
-## Pakai
+## Pakai: panel mengambang
+
+```bash
+.venv/bin/meetrec          # buka panel di pojok kanan atas
+```
+
+| Keadaan | Isi panel |
+|---|---|
+| Diam | folder penyimpanan (klik ikon folder untuk ganti) · **Mulai** · **Tutup** |
+| Merekam | menit berjalan · **Gambar** · **Jeda** · **Stop**. Tombol Tutup hilang, dan jendela menolak ditutup. |
+| Mode gambar | + pensil / teks · 6 warna · ketebalan · urungkan · **simpan** · **hapus** |
+
+- **Gambar:** layar dibekukan dengan screenshot lalu kamu coret di atasnya. Simpan → `drawings/drawing_<jam>.png` di folder rekaman;
+  hapus → dibuang. Keduanya menutup mode gambar. Rekaman audio jalan terus.
+- **Tanpa screenshot:** kalau OS menolak screenshot (Wayland, atau izin Screen Recording macOS belum diberikan),
+  layar tidak dibekukan: kamu mencoret langsung di atas layar yang hidup, dan PNG-nya hanya berisi coretan (latar transparan).
+- **Jeda:** audio selama jeda dibuang dari kedua track, jadi keduanya tetap sejajar. `meta.json` mencatat tiap jeda.
+
+## Pakai: baris perintah
 
 ```bash
 .venv/bin/meetrec devices                      # cek mic dan speaker terdeteksi
