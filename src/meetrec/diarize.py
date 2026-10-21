@@ -3,7 +3,7 @@ from pathlib import Path
 
 import sherpa_onnx
 
-from .audio import read_wav
+from .audio import RATE, load_16k_mono
 from .models import diarization_models
 
 
@@ -29,8 +29,7 @@ def diarize(wav: str | Path, num_speakers: int = -1, threshold: float = 0.3,
         clustering=sherpa_onnx.FastClusteringConfig(num_clusters=num_speakers, threshold=threshold),
         min_duration_on=0.3, min_duration_off=0.5)
     sd = sherpa_onnx.OfflineSpeakerDiarization(cfg)
-    samples, sr = read_wav(wav)
-    if sr != sd.sample_rate:
-        raise ValueError(f"{wav}: need {sd.sample_rate} Hz, got {sr}")
+    samples = load_16k_mono(wav)
+    assert sd.sample_rate == RATE
     out = sd.process(samples).sort_by_start_time()
     return [Segment(f"Remote {r.speaker + 1}", r.start, r.end) for r in out]
