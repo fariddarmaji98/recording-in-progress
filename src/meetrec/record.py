@@ -22,6 +22,7 @@ from pathlib import Path
 import numpy as np
 
 MAC = sys.platform == "darwin"
+READY_TIMEOUT = 15  # seconds a device may take to open before start() gives up
 
 
 def list_devices() -> dict[str, list[str]]:
@@ -74,7 +75,7 @@ class _WavThread(_Track, threading.Thread):
                 device = self.open_device()
                 self.device_name = device.name
                 n = self.rate // 10
-                with device.recorder(samplerate=self.rate, channels=None, blocksize=n) as rec, \
+                with device.recorder(samplerate=self.rate, channels=None) as rec, \
                         wave.open(str(self.path), "wb") as w:
                     w.setnchannels(1)
                     w.setsampwidth(2)
@@ -190,7 +191,10 @@ class Session:
             self._tap.start()
             self._tapw.offset = time.monotonic() - self.t0
         for t in threads:
-            t.ready.wait(timeout=10)
+            if not t.ready.wait(timeout=READY_TIMEOUT):
+                self.stop()
+                raise RuntimeError(f"{t.label}: perangkat tidak siap dalam {READY_TIMEOUT} detik "
+                                   "(CoreAudio/izin menggantung). Coba lagi.")
             if t.error:
                 self.stop()
                 raise RuntimeError(f"{t.label}: {t.error}") from t.error
@@ -220,6 +224,10 @@ class Session:
         """Recorded time, excluding pauses."""
         now = self._paused_at if self._paused_at is not None else time.monotonic()
         return max(0.0, now - self.t0 - self._paused_total)
+
+    def errors(self) -> list[str]:
+        """Per-track errors that happened after start (e.g. a device that died mid-recording)."""
+        return [f"{t.label}: {t.error}" for t in self._tracks() if t.error]
 
     def status(self) -> str:
         def bar(p: float) -> str:

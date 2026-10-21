@@ -8,6 +8,7 @@ drawing   : + pencil/text · colors · thickness · undo · save · discard
 """
 from __future__ import annotations
 
+import signal
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -266,6 +267,7 @@ class Panel(QWidget):
         self.session = None
         self.overlay: DrawOverlay | None = None
         self._placed = False
+        self._shown_errors: list[str] = []
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(6, 6, 6, 6)
@@ -424,6 +426,10 @@ class Panel(QWidget):
     def update_timer(self) -> None:
         if not self.session:
             return
+        errs = self.session.errors() if hasattr(self.session, 'errors') else []
+        if errs and errs != self._shown_errors:
+            self._shown_errors = errs
+            self.set_status('Masalah rekam: ' + '; '.join(errs), error=True)
         mm, ss = divmod(int(self.session.active_seconds()), 60)
         self.timer_lbl.setText(("⏸ " if self.state == "paused" else "● ") + f"{mm:02d}:{ss:02d}")
 
@@ -448,6 +454,7 @@ class Panel(QWidget):
             self.set_status(f"Gagal mulai: {e}", error=True)
             return
         self.state = "recording"
+        self._shown_errors = []
         self.set_status("")
         self.update_timer()
         self.tick.start()
@@ -581,6 +588,18 @@ def run() -> None:
     panel.show()
     panel.place_top_right()
     app.aboutToQuit.connect(lambda: panel.session and panel.session.stop())
+
+    # Ctrl-C / kill: stop and save the recording instead of dying with half-written files.
+    def graceful(*_):
+        if panel.state != "idle":
+            panel.stop()
+        app.quit()
+
+    signal.signal(signal.SIGINT, graceful)
+    signal.signal(signal.SIGTERM, graceful)
+    keepalive = QTimer()  # lets the Python-level signal handlers run while Qt owns the loop
+    keepalive.timeout.connect(lambda: None)
+    keepalive.start(200)
     sys.exit(app.exec())
 
 

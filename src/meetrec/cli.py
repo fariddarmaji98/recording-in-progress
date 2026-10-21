@@ -1,5 +1,6 @@
 import argparse
 import json
+import signal
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -23,6 +24,7 @@ def cmd_record(a: argparse.Namespace) -> None:
     s = Session(a.out, rate=a.rate, mic=not a.no_mic, system=not a.no_system,
                 mic_name=a.mic, speaker_name=a.speaker)
     s.start()
+    signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))  # kill also saves
     print(f"Merekam ke {s.dir}\nCtrl-C untuk berhenti.")
     try:
         while True:
