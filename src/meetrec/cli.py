@@ -5,7 +5,7 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-DEFAULT_OUT = Path.home() / "Recordings" / "meetrec"
+from .paths import DEFAULT_OUT
 
 
 def cmd_devices(_: argparse.Namespace) -> None:
@@ -88,6 +88,12 @@ def cmd_fullmedia(a: argparse.Namespace) -> None:
     print(build_full_media(a.folder, a.out))
 
 
+def cmd_player(a: argparse.Namespace) -> None:
+    from .player import run
+
+    run(a.folder)
+
+
 def cmd_ui(_: argparse.Namespace) -> None:
     from .ui import run
 
@@ -103,6 +109,10 @@ def main() -> None:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("ui", help="buka panel mengambang (default kalau tanpa argumen)").set_defaults(fn=cmd_ui)
+    pl = sub.add_parser("player", help="putar rekaman (video + audio) dengan pilihan track Mix / Mic / System")
+    pl.add_argument("folder", type=Path, nargs="?", help="folder rekaman (default: yang terbaru dan sudah selesai)")
+    pl.set_defaults(fn=cmd_player)
+
     f = sub.add_parser("fullmedia", help="gabungkan video + mic + sistem jadi satu mp4 (file asli tidak dihapus)")
     f.add_argument("folder", type=Path)
     f.add_argument("--out", default="full.mp4", help="nama file hasil di dalam folder (default full.mp4)")

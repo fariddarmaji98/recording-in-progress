@@ -22,10 +22,10 @@ from PySide6.QtGui import (QColor, QDesktopServices, QFont, QGuiApplication, QIc
 from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QSlider, QVBoxLayout, QWidget)
 
+from .paths import DEFAULT_OUT
 from .screen import ScreenRecorder, screen_permission
 from .winutil import exclude_from_capture
 
-DEFAULT_OUT = Path.home() / "Recordings" / "meetrec"
 COLORS = ["#ff3b30", "#ffcc00", "#34c759", "#0a84ff", "#ffffff", "#111111"]
 FG = "#e8ebf2"
 _W = Qt.WindowType
@@ -67,6 +67,10 @@ def make_icon(name: str, color: str = FG) -> QIcon:
         p.setPen(QPen(c, 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
         p.setBrush(c)
         p.drawPolygon(QPolygonF([P(9, 39), P(12, 28), P(20, 36)]))
+    elif name == "film":
+        p.drawRoundedRect(QRectF(8, 12, 32, 24), 3, 3)
+        p.drawLine(18, 12, 18, 36)
+        p.drawLine(30, 12, 30, 36)
     elif name == "text":
         p.drawLine(12, 12, 36, 12)
         p.drawLine(24, 12, 24, 38)
@@ -366,9 +370,12 @@ class Panel(QWidget):
         self.start_btn.setIcon(make_icon("play"))
         self.start_btn.setIconSize(QSize(18, 18))
         self.start_btn.clicked.connect(self.start)
+        self.play_rec_btn = self._btn("film", tip="Putar rekaman")
+        self.play_rec_btn.clicked.connect(self.open_player)
         self.close_btn = self._btn("close", tip="Tutup aplikasi")
         self.close_btn.clicked.connect(QApplication.quit)
         h.addWidget(self.start_btn, 1)
+        h.addWidget(self.play_rec_btn)
         h.addWidget(self.close_btn)
         v.addWidget(self.idle_row)
 
@@ -708,6 +715,16 @@ class Panel(QWidget):
         self.show()
         self.raise_()
         exclude_from_capture(self)  # the native window was recreated
+
+    def open_player(self) -> None:
+        from .player import PlayerWindow
+
+        if getattr(self, "_player", None) is not None and self._player.isVisible():
+            self._player.raise_()
+            self._player.activateWindow()
+            return
+        self._player = PlayerWindow(self.out_dir)
+        self._player.show()
 
     def shutdown(self) -> None:
         """Stop and save whatever is going on, also when quit/kill arrives while the devices are still opening."""

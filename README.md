@@ -5,7 +5,7 @@ Perekam meeting pribadi (alternatif rekaman Meet berbayar). Merekam **apa yang m
 Python, target Windows / Linux / macOS.
 
 **Status: WIP.** Jalan: panel mengambang (rekam audio + layar, jeda, coret-coret layar), timeline per pembicara (termasuk overlap),
-potong per pembicara per section, generate full media. Belum ada: video player.
+potong per pembicara per section, generate full media, video player.
 
 ## Cara kerja
 
@@ -15,6 +15,7 @@ potong per pembicara per section, generate full media. Belum ada: video player.
 | Rekam suara sistem → `system.wav` | Windows: WASAPI loopback. Linux: monitor source PulseAudio/PipeWire (`soundcard`). macOS: Core Audio tap ([`catap`](https://pypi.org/project/catap/), macOS 14.2+). |
 | Rekam layar → `video.mp4` | `mss` mengambil layar di thread sendiri, PyAV meng-encode H.264 (hardware encoder di macOS bila ada). **Tanpa suara**: suara ada di `mic.wav` dan `system.wav`. Jeda memotong video seperti audio. |
 | Full media → `full.mp4` | Menggabungkan `video.mp4` + `mic.wav` + `system.wav` jadi satu mp4 (ffmpeg bawaan paket `imageio-ffmpeg`). File asli tidak dihapus. |
+| Video player | `meetrec player` atau tombol film di panel. Memutar `full.mp4` (Qt Multimedia): pilih track audio **Mix / Mic (Me) / System (Remote)**, kecepatan 0.5×–2×, seek, spasi = putar/jeda, ←/→ = ±5 detik. Kalau `full.mp4` belum ada atau lebih tua dari sumbernya, dibuat otomatis di background. |
 | Timeline `speakers.json` | `sherpa-onnx` (pyannote segmentation-3.0). Segmen pembicara berbeda boleh tumpang tindih; zona overlap dicatat. |
 | Potong per orang `sections/` | Satu wav per pembicara per section + satu klip campuran per zona overlap. |
 | Transkrip teks | Opsional (`pip install -e ".[transcribe]"`). |
@@ -65,6 +66,7 @@ Linux: butuh `libpulse` (PulseAudio atau `pipewire-pulse`). macOS: izinkan **Mic
 .venv/bin/meetrec record                       # Ctrl-C untuk berhenti -> ~/Recordings/meetrec/<waktu>/
 .venv/bin/meetrec timeline <folder>            # speakers.json
 .venv/bin/meetrec split <folder>               # sections/ per pembicara + _overlaps/
+.venv/bin/meetrec player [folder]             # putar rekaman (default: yang terbaru dan sudah selesai)
 .venv/bin/meetrec fullmedia <folder>           # full.mp4: video + audio digabung (file asli tetap)
 .venv/bin/meetrec transcribe <folder>          # opsional, butuh extra [transcribe]
 ```

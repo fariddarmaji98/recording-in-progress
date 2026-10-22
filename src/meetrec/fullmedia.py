@@ -24,6 +24,16 @@ def ffmpeg_exe() -> str:
         raise RuntimeError("ffmpeg tidak ditemukan (pip install imageio-ffmpeg)")
 
 
+def is_up_to_date(folder: Path, out_name: str = "full.mp4") -> bool:
+    """True when the full media exists and is newer than every source file."""
+    folder = Path(folder)
+    out = folder / out_name
+    if not out.exists():
+        return False
+    sources = [folder / n for n in ("video.mp4", "mic.wav", "system.wav", "meta.json") if (folder / n).exists()]
+    return all(p.stat().st_mtime <= out.stat().st_mtime for p in sources)
+
+
 def build_full_media(folder: Path, out_name: str = "full.mp4") -> Path:
     folder = Path(folder)
     meta_file = folder / "meta.json"
