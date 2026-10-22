@@ -56,6 +56,8 @@ class _Builder(QThread):
 
 
 class PlayerWindow(QWidget):
+    closed = Signal()  # emitted once, when the window is closed (the panel then comes back)
+
     def __init__(self, root: Path = DEFAULT_OUT, folder: Path | None = None):
         super().__init__()
         self.setWindowTitle("meetrec: putar rekaman")
@@ -251,6 +253,9 @@ class PlayerWindow(QWidget):
         if self._builder:
             self._builder.wait(5000)
         super().closeEvent(e)
+        if not getattr(self, "_announced", False):
+            self._announced = True
+            self.closed.emit()
 
 
 def run(folder: Path | None = None) -> None:

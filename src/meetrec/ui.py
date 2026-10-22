@@ -521,6 +521,7 @@ class Panel(QWidget):
         self.state = "idle"  # idle | starting | recording | paused
         self._choosing = False  # the 'what to record' picker is open
         self._target: WindowInfo | None = None
+        self._player = None  # the recordings list / player window while it is open
         self.session = None
         self.overlay: DrawOverlay | None = None
         self._placed = False
@@ -1067,12 +1068,24 @@ class Panel(QWidget):
     def open_player(self) -> None:
         from .player import PlayerWindow
 
-        if getattr(self, "_player", None) is not None and self._player.isVisible():
+        if self._player is not None and self._player.isVisible():
             self._player.raise_()
             self._player.activateWindow()
             return
         self._player = PlayerWindow(self.out_dir)
+        self._player.closed.connect(self._player_closed)
+        # The player is a sub page. This panel is always on top, so it would cover the player:
+        # hide it while the player is open and bring it back when the player closes.
+        self.hide()
         self._player.show()
+        self._player.raise_()
+        self._player.activateWindow()
+
+    def _player_closed(self) -> None:
+        self._player = None
+        self.show()
+        self.raise_()
+        exclude_from_capture(self)
 
     def shutdown(self) -> None:
         """Stop and save whatever is going on, also when quit/kill arrives while the devices are still opening."""
