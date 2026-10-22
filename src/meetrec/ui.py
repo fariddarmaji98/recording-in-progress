@@ -366,7 +366,7 @@ class LevelLine(QWidget):
 
 
 AUDIO_RATES = [(16000, "16 kHz: hemat tempat, cukup untuk suara"), (24000, "24 kHz"), (48000, "48 kHz: kualitas tertinggi")]
-VIDEO_FPS = [4, 8, 15]
+VIDEO_FPS = [4, 8, 15, 30]
 
 
 class SettingsDialog(QDialog):
