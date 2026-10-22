@@ -31,11 +31,15 @@ from .paths import DEFAULT_OUT
 from .widgets import BUTTON_STYLE, FG, IconButton, make_icon
 from .screen import ScreenRecorder, screen_permission
 from .windows import WindowInfo, list_windows
-from .winutil import exclude_from_capture
+from .winutil import exclude_from_capture, set_close_enabled
 
 COLORS = ["#ff3b30", "#ffcc00", "#34c759", "#0a84ff", "#ffffff", "#111111"]
 _W = Qt.WindowType
 _A = Qt.WidgetAttribute
+# The main panel is a normal window with the OS title bar but ONLY close + minimize (no maximize), kept on top
+# while you work in another app. The OS draws those controls; there is no custom close button.
+PANEL_FLAGS = (_W.Window | _W.CustomizeWindowHint | _W.WindowTitleHint | _W.WindowCloseButtonHint
+               | _W.WindowMinimizeButtonHint | _W.WindowStaysOnTopHint)
 
 
 def _screen_capture_allowed() -> bool:
@@ -385,7 +389,8 @@ class _Starter(QThread):
 
 # --- panel ---------------------------------------------------------------------------------------
 STYLE = f"""
-#card {{ background: #1c2029; border-radius: 14px; border: 1px solid #2c3242; }}
+#panel {{ background: #1c2029; }}
+#card {{ background: transparent; border: none; }}
 QLabel {{ color: {FG}; font-size: 13px; }}
 #path {{ color: #aab2c5; }}
 #status {{ color: #8f98ad; font-size: 11px; }}
@@ -409,9 +414,9 @@ QSlider::handle:horizontal {{ width: 14px; margin: -6px 0; border-radius: 7px; b
 
 class Panel(QWidget):
     def __init__(self):
-        super().__init__(None, _W.Tool | _W.FramelessWindowHint | _W.WindowStaysOnTopHint)
-        self.setAttribute(_A.WA_TranslucentBackground)
-        self.setAttribute(_A.WA_MacAlwaysShowToolWindow, True)
+        super().__init__(None, PANEL_FLAGS)
+        self.setObjectName("panel")
+        self.setWindowTitle("meetrec")
         self.setStyleSheet(STYLE + BUTTON_STYLE)
         self.settings = QSettings("meetrec", "meetrec")
         self.out_dir = Path(self.settings.value("out_dir", str(DEFAULT_OUT)))
@@ -434,7 +439,7 @@ class Panel(QWidget):
         self._ov_version = -1
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(6, 6, 6, 6)
+        outer.setContentsMargins(0, 0, 0, 0)
         card = QFrame(objectName="card")
         outer.addWidget(card)
         v = QVBoxLayout(card)
@@ -470,10 +475,8 @@ class Panel(QWidget):
         self.play_rec_btn.clicked.connect(self.open_player)
         self.settings_btn = IconButton("gear", "Pengaturan")
         self.settings_btn.clicked.connect(self.open_settings)
-        self.close_btn = IconButton("close", "Tutup aplikasi")
-        self.close_btn.clicked.connect(QApplication.quit)
         h.addStretch(1)
-        for btn in (self.start_btn, self.play_rec_btn, self.settings_btn, self.close_btn):
+        for btn in (self.start_btn, self.play_rec_btn, self.settings_btn):
             h.addWidget(btn)
         iv.addWidget(self.actions_section)
         v.addWidget(self.idle_row)
@@ -630,16 +633,38 @@ class Panel(QWidget):
         return b
 
     def _fit(self) -> None:
+        """Height follows the content in BOTH directions (a top-level window only grows by itself, which left it
+        tall after the picker or the application list was closed). Width stays fixed."""
         right = self.x() + self.width() if self._placed else None
-        self.adjustSize()
+        lay = self.layout()
+        lay.invalidate()
+        lay.activate()  # visibility changes are applied lazily; measure the layout as it is NOW
+        h = lay.totalHeightForWidth(self.width()) if lay.hasHeightForWidth() else self.sizeHint().height()
+        self.setFixedHeight(max(h, self.minimumSizeHint().height()))  # fixed = not draggable to another size
         if right is not None:
             self.move(right - self.width(), self.y())
+        if not getattr(self, "_refit_pending", False):  # once more when the event loop has settled the layout
+            self._refit_pending = True
+            QTimer.singleShot(0, self._refit)
+
+    def _refit(self) -> None:
+        self._refit_pending = False
+        if self.overlay is None or self.isWindow():  # not while the panel is a child of the drawing overlay
+            self._fit()
+            self._sync_close()
+
+    def _sync_close(self) -> None:
+        """Native close button greyed out while recording. Applied AFTER resizing: changing the size hints makes
+        the OS rebuild the window buttons and would undo it."""
+        if self.isWindow():
+            set_close_enabled(self, self.state == "idle")
 
     def place_center(self) -> None:
         """Exact middle of the whole screen the panel is on (used when the app starts)."""
         g = (self.screen() or QGuiApplication.primaryScreen()).geometry()
         self.adjustSize()
-        self.move(g.center().x() - self.width() // 2, g.center().y() - self.height() // 2)
+        fg = self.frameGeometry()  # includes the title bar
+        self.move(g.center().x() - fg.width() // 2, g.center().y() - fg.height() // 2)
         self._placed = True
 
     def show_initial(self) -> None:
@@ -662,16 +687,22 @@ class Panel(QWidget):
         idle = self.state in ("idle", "starting")
         drawing = self.overlay is not None
         choosing = self._choosing and self.state == "idle"
-        self.idle_row.setVisible(idle and not choosing)
-        self.pick_row.setVisible(choosing)
-        self.rec_row.setVisible(not idle)
-        self.draw_row.setVisible(drawing)
+        want = [(self.idle_row, idle and not choosing), (self.pick_row, choosing), (self.rec_row, not idle),
+                (self.draw_row, drawing), (self.level, self.state in ("recording", "paused"))]
+        # Hide first, then show. Showing a section while the old one is still visible makes the window grow to fit
+        # both, and a top-level window never shrinks by itself afterwards (it stayed tall after closing the picker).
+        for w, visible in want:
+            if not visible:
+                w.setVisible(False)
+        for w, visible in want:
+            if visible:
+                w.setVisible(True)
         self.draw_btn.setEnabled(not drawing and not idle)
         self.path_lbl.setPath(str(self.out_dir))
-        self.level.setVisible(self.state in ("recording", "paused"))  # no empty strip on the first screen
         self.pause_btn.setIcon(make_icon("play" if self.state == "paused" else "pause"))
         self.pause_btn.setToolTip("Lanjut" if self.state == "paused" else "Jeda")
         self._fit()
+        self._sync_close()
 
     def _elide(self, s: str, n: int = 34) -> str:
         return s if len(s) <= n else "…" + s[-(n - 1):]
@@ -701,7 +732,9 @@ class Panel(QWidget):
         self.timer_lbl.setText(("⏸ " if self.state == "paused" else "● ") + f"{mm:02d}:{ss:02d}")
         names = self.bridge.names() if self.bridge.recording else []
         self.meet_lbl.setText("Ekstensi Meet terhubung: " + ", ".join(names) if names else "")
-        self.meet_lbl.setVisible(bool(names))
+        if self.meet_lbl.isVisibleTo(self) != bool(names):
+            self.meet_lbl.setVisible(bool(names))
+            self._fit()  # height follows the content (it is locked, so it must be refitted when a line appears)
 
     # --- actions ---------------------------------------------------------------------------------
     def choose_folder(self) -> None:
@@ -763,7 +796,6 @@ class Panel(QWidget):
         self.session = Session(self.out_dir, rate=self.settings.value("audio_rate", 16000, type=int))
         self.state = "starting"
         self.start_btn.setEnabled(False)
-        self.close_btn.setEnabled(False)
         self.start_btn.setToolTip("Menyiapkan…")
         self.refresh()
         self.set_status("Membuka mikrofon, audio sistem, dan layar…")
@@ -775,7 +807,6 @@ class Panel(QWidget):
     def _started(self, err: str) -> None:
         self._starter.wait(3000)  # run() has already returned; let the thread finish before it is dropped
         self.start_btn.setEnabled(True)
-        self.close_btn.setEnabled(True)
         self.start_btn.setToolTip("Mulai rekam")
         if err:
             self.session = None
@@ -887,7 +918,6 @@ class Panel(QWidget):
         # moment the overlay was clicked (the OS raises the clicked window).
         local = self._top_left - screen.geometry().topLeft()
         self.setParent(ov)
-        self.setAttribute(_A.WA_TranslucentBackground, False)
         self.move(local)
         ov.show()
         self.show()
@@ -951,9 +981,7 @@ class Panel(QWidget):
             gpos = ov.mapToGlobal(self.pos()) if self.parent() is ov else self._top_left
             self.hide()
             # take the panel out of the overlay BEFORE closing it, or it is deleted with its parent
-            self.setParent(None, _W.Tool | _W.FramelessWindowHint | _W.WindowStaysOnTopHint)
-            self.setAttribute(_A.WA_TranslucentBackground, True)
-            self.setAttribute(_A.WA_MacAlwaysShowToolWindow, True)
+            self.setParent(None, PANEL_FLAGS)
             self.move(gpos)
             ov.close()
             ov.deleteLater()
@@ -1034,8 +1062,10 @@ class Panel(QWidget):
     def closeEvent(self, e):
         if self.state != "idle":  # recording, paused or still starting
             e.ignore()  # no closing while recording
+            self.set_status("Hentikan rekaman dulu (tombol Stop) sebelum menutup aplikasi.", error=True)
             return
         super().closeEvent(e)
+        QApplication.quit()  # the main page is the app: closing it ends the app
 
 
 def _prewarm() -> None:

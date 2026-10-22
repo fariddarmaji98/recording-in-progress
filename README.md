@@ -52,6 +52,8 @@ Ekstensi tidak mengirim apa pun ke internet. Data hanya disimpan saat kamu merek
 bukan API publik dan bisa berubah, jadi cek popup di rapat pertamamu; kalau tidak ada yang terdeteksi, nyalakan caption atau ubah *Kepekaan* di Opsi.
 Tes JS: `cd extension && npm install && npm test`.
 
+**Jendela:** panel utama = jendela biasa dengan bilah judul bawaan OS yang hanya punya **close** (menutup aplikasi) dan **minimize** (tanpa maximize, ukuran terkunci mengikuti isi), selalu di atas aplikasi lain. Daftar rekaman dan player = **close + minimize + maximize** bawaan OS.
+
 ## Pasang
 
 ```bash
@@ -70,9 +72,9 @@ Linux: butuh `libpulse` (PulseAudio atau `pipewire-pulse`). macOS: izinkan **Mic
 
 | Keadaan | Isi panel |
 |---|---|
-| Awal | dua section, atas-bawah. **Atas:** ikon folder + jalur penyimpanan **lengkap** (klik ikon atau teksnya untuk ganti folder). **Bawah:** **▶ mulai** · **daftar rekaman / player** · **⚙ pengaturan** · **✕ tutup**. |
+| Awal | dua section, atas-bawah. **Atas:** ikon folder + jalur penyimpanan **lengkap** (klik ikon atau teksnya untuk ganti folder). **Bawah:** **▶ mulai** · **daftar rekaman / player** · **⚙ pengaturan**. Tombol tutup dan minimize ada di bilah judul jendela bawaan sistem (bukan tombol buatan sendiri). |
 | Klik ▶ | pilihan **Layar penuh** atau **Aplikasi** (daftar jendela yang terbuka; Zoom, Meet, Teams, dan sejenisnya diurutkan paling atas). Klik dua kali atau pilih lalu **Mulai rekam aplikasi ini**. |
-| Merekam | menit berjalan · **Gambar** · **Jeda** · **Stop**. Tombol Tutup hilang, dan jendela menolak ditutup. |
+| Merekam | menit berjalan · **Gambar** · **Jeda** · **Stop**. Tombol close bawaan dinonaktifkan dan jendela menolak ditutup (muncul petunjuk); minimize tetap bisa. |
 | Mode gambar | + pensil / teks · 6 warna · ketebalan · urungkan · **simpan** · **hapus** |
 
 - **Tombol:** semua tombol ikon adalah satu komponen (`IconButton`): persegi, ukuran sama persis (satu konstanta `IconButton.SIZE`), warna lewat `tone` (hijau/merah/biasa).

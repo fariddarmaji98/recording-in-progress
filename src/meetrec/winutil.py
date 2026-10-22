@@ -27,3 +27,33 @@ def exclude_from_capture(widget) -> bool:
     except Exception:
         return False
     return False
+
+
+def set_close_enabled(widget, enabled: bool) -> bool:
+    """Grey out / restore the window's native close button (macOS red dot, Windows system menu).
+    Used while recording; closeEvent also refuses, so other platforms are covered too."""
+    try:
+        from PySide6.QtGui import QGuiApplication
+
+        plat = QGuiApplication.platformName()
+        if not ((sys.platform == "darwin" and plat == "cocoa") or (sys.platform == "win32" and plat == "windows")):
+            return False
+        wid = int(widget.winId())
+        if sys.platform == "darwin":
+            import objc
+
+            win = objc.objc_object(c_void_p=wid).window()
+            btn = win.standardWindowButton_(0)  # NSWindowCloseButton
+            if btn is None:
+                return False
+            btn.setEnabled_(bool(enabled))
+            return True
+        import ctypes
+
+        user32 = ctypes.windll.user32
+        hwnd = wid
+        menu = user32.GetSystemMenu(hwnd, False)
+        SC_CLOSE, MF_BYCOMMAND, MF_GRAYED, MF_ENABLED = 0xF060, 0x0, 0x1, 0x0
+        return bool(user32.EnableMenuItem(menu, SC_CLOSE, MF_BYCOMMAND | (MF_ENABLED if enabled else MF_GRAYED)) != -1)
+    except Exception:
+        return False

@@ -22,6 +22,11 @@ from .fullmedia import build_full_media, is_up_to_date
 from .paths import DEFAULT_OUT, list_recordings
 from .widgets import BUTTON_STYLE, FG, IconButton
 
+# Other pages: the OS's own close + minimize + maximize (no custom buttons).
+FULL_WINDOW_FLAGS = (Qt.WindowType.Window | Qt.WindowType.WindowTitleHint | Qt.WindowType.WindowSystemMenuHint
+                     | Qt.WindowType.WindowCloseButtonHint | Qt.WindowType.WindowMinimizeButtonHint
+                     | Qt.WindowType.WindowMaximizeButtonHint)
+
 TRACK_FALLBACK = ["Mix (semua suara)", "Mic (Me)", "System (Remote)"]
 SPEEDS = [("0.5×", 0.5), ("0.75×", 0.75), ("1×", 1.0), ("1.25×", 1.25), ("1.5×", 1.5), ("2×", 2.0)]
 STYLE = """
@@ -62,7 +67,7 @@ class PlayerWindow(QWidget):
     closed = Signal()  # emitted once, when the window is closed (the panel then comes back)
 
     def __init__(self, root: Path = DEFAULT_OUT, folder: Path | None = None):
-        super().__init__()
+        super().__init__(None, FULL_WINDOW_FLAGS)
         self.setWindowTitle("meetrec: putar rekaman")
         self.setStyleSheet(STYLE)
         self.resize(980, 660)
@@ -465,7 +470,7 @@ class RecordingsWindow(QWidget):
     closed = Signal()
 
     def __init__(self, root: Path = DEFAULT_OUT, cache_dir: Path = CACHE_DIR, trash=None, open_folder=None):
-        super().__init__()
+        super().__init__(None, FULL_WINDOW_FLAGS)
         self.setWindowTitle("meetrec: rekaman")
         self.setStyleSheet(STYLE + CARD_STYLE)
         self.root = Path(root)
