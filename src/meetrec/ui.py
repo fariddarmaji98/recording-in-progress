@@ -15,15 +15,18 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from collections import deque
+
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, QSettings, QSize, Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import (QColor, QDesktopServices, QFont, QGuiApplication, QIcon, QImage, QPainter,
                            QPainterPath, QPen, QPixmap, QPolygonF)
-from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
-                               QPushButton, QSlider, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+                               QListWidgetItem, QPushButton, QSlider, QVBoxLayout, QWidget)
 
 from .paths import DEFAULT_OUT
 from .screen import ScreenRecorder, screen_permission
+from .windows import WindowInfo, list_windows
 from .winutil import exclude_from_capture
 
 COLORS = ["#ff3b30", "#ffcc00", "#34c759", "#0a84ff", "#ffffff", "#111111"]
@@ -71,6 +74,18 @@ def make_icon(name: str, color: str = FG) -> QIcon:
         p.drawRoundedRect(QRectF(8, 12, 32, 24), 3, 3)
         p.drawLine(18, 12, 18, 36)
         p.drawLine(30, 12, 30, 36)
+    elif name == "list":
+        p.drawRoundedRect(QRectF(8, 9, 32, 30), 4, 4)
+        for y in (19, 26, 33):
+            p.drawLine(15, y, 33 if y != 33 else 27, y)
+    elif name == "screen":
+        p.drawRoundedRect(QRectF(7, 10, 34, 22), 3, 3)
+        p.drawLine(24, 32, 24, 38)
+        p.drawLine(15, 38, 33, 38)
+    elif name == "window":
+        p.drawRoundedRect(QRectF(7, 14, 26, 22), 3, 3)
+        p.drawLine(7, 21, 33, 21)
+        p.drawRoundedRect(QRectF(17, 8, 24, 18), 3, 3)
     elif name == "text":
         p.drawLine(12, 12, 36, 12)
         p.drawLine(24, 12, 24, 38)
@@ -260,14 +275,55 @@ class DrawOverlay(QWidget):
             self._commit_text()
 
 
+class LevelLine(QWidget):
+    """Thin live waveform: green = microphone, blue = system sound. Flat when nothing is recorded."""
+
+    N = 150
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedHeight(26)
+        self.setToolTip("Level suara langsung: hijau = mikrofon, biru = suara sistem")
+        self.mic = deque([0.0] * self.N, maxlen=self.N)
+        self.sys = deque([0.0] * self.N, maxlen=self.N)
+
+    def push(self, mic: float, system: float) -> None:
+        self.mic.append(mic)
+        self.sys.append(system)
+        self.update()
+
+    def reset(self) -> None:
+        self.mic.extend([0.0] * self.N)
+        self.sys.extend([0.0] * self.N)
+        self.update()
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        mid = h / 2
+        p.setPen(QPen(QColor("#3a4258"), 1.5))
+        p.drawLine(0, int(mid), w, int(mid))
+        step = w / self.N
+        for series, color in ((self.sys, "#0a84ff"), (self.mic, "#34c759")):
+            p.setPen(QPen(QColor(color), max(1.5, step * 0.6), Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            for i, v in enumerate(series):
+                if v <= 0.002:
+                    continue
+                a = min(1.0, (v ** 0.5) * 1.6) * (mid - 2)  # sqrt: quiet speech is still visible
+                x = int(i * step + step / 2)
+                p.drawLine(x, int(mid - a), x, int(mid + a))
+
+
 class _Starter(QThread):
     """Opens the devices off the UI thread (CoreAudio can take seconds), then reports ok or an error."""
 
     done = Signal(str)  # "" = ok, else the error text
 
-    def __init__(self, session):
+    def __init__(self, session, window: WindowInfo | None = None):
         super().__init__()
         self.session = session
+        self.window = window
         self.video: ScreenRecorder | None = None
         self.video_note = ""
 
@@ -283,7 +339,7 @@ class _Starter(QThread):
                 self.video_note = ("Izin Screen Recording belum diberikan, jadi layar tidak direkam (audio tetap jalan). "
                                    "Beri izin lalu buka ulang aplikasi.")
             else:
-                v = ScreenRecorder(self.session.dir / "video.mp4", t0)
+                v = ScreenRecorder(self.session.dir / "video.mp4", t0, window=self.window)
                 v.start()
         except Exception as e:
             self.video_note = f"Video gagal: {e}"
@@ -316,8 +372,13 @@ QPushButton {{ background: #2a3040; color: {FG}; border: none; border-radius: 8p
 QPushButton:hover {{ background: #384058; }}
 QPushButton:disabled {{ background: #232836; color: #5d667c; }}
 QPushButton:checked {{ background: #4a6cf7; }}
-#start {{ background: #2ea043; font-weight: 600; padding: 7px 16px; }}
+#start {{ background: #2ea043; padding: 0; }}
 #start:hover {{ background: #3bb653; }}
+#startwide {{ background: #2ea043; font-weight: 600; padding: 7px 14px; }}
+#startwide:hover {{ background: #3bb653; }}
+QListWidget {{ background: #232836; border: none; border-radius: 8px; color: {FG}; padding: 4px; }}
+QListWidget::item {{ padding: 5px 6px; border-radius: 6px; }}
+QListWidget::item:selected {{ background: #4a6cf7; }}
 #stop {{ background: #d03b3b; }}
 #stop:hover {{ background: #e24c4c; }}
 QSlider::groove:horizontal {{ height: 4px; background: #3a4258; border-radius: 2px; }}
@@ -333,7 +394,9 @@ class Panel(QWidget):
         self.setStyleSheet(STYLE)
         self.settings = QSettings("meetrec", "meetrec")
         self.out_dir = Path(self.settings.value("out_dir", str(DEFAULT_OUT)))
-        self.state = "idle"  # idle | recording | paused
+        self.state = "idle"  # idle | starting | recording | paused
+        self._choosing = False  # the 'what to record' picker is open
+        self._target: WindowInfo | None = None
         self.session = None
         self.overlay: DrawOverlay | None = None
         self._placed = False
@@ -351,33 +414,76 @@ class Panel(QWidget):
         v.setContentsMargins(12, 10, 12, 10)
         v.setSpacing(8)
 
-        # folder row
-        self.folder_row = QWidget()
-        h = QHBoxLayout(self.folder_row)
+        # first screen (as sketched): folder + path | green play | list | close
+        self.idle_row = QWidget()
+        self.folder_row = self.idle_row  # older name for the same row
+        h = QHBoxLayout(self.idle_row)
         h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(8)
         self.folder_btn = self._btn("folder", tip="Pilih folder penyimpanan")
         self.folder_btn.clicked.connect(self.choose_folder)
         self.path_lbl = QLabel(objectName="path")
-        h.addWidget(self.folder_btn)
-        h.addWidget(self.path_lbl, 1)
-        v.addWidget(self.folder_row)
-
-        # idle row
-        self.idle_row = QWidget()
-        h = QHBoxLayout(self.idle_row)
-        h.setContentsMargins(0, 0, 0, 0)
-        self.start_btn = QPushButton(" Mulai", objectName="start")
+        self.start_btn = QPushButton(objectName="start")
         self.start_btn.setIcon(make_icon("play"))
-        self.start_btn.setIconSize(QSize(18, 18))
-        self.start_btn.clicked.connect(self.start)
-        self.play_rec_btn = self._btn("film", tip="Putar rekaman")
+        self.start_btn.setIconSize(QSize(22, 22))
+        self.start_btn.setFixedSize(46, 34)
+        self.start_btn.setToolTip("Mulai rekam")
+        self.start_btn.clicked.connect(self.show_picker)
+        self.play_rec_btn = self._btn("list", tip="Daftar rekaman / putar")
         self.play_rec_btn.clicked.connect(self.open_player)
         self.close_btn = self._btn("close", tip="Tutup aplikasi")
         self.close_btn.clicked.connect(QApplication.quit)
-        h.addWidget(self.start_btn, 1)
+        h.addWidget(self.folder_btn)
+        h.addWidget(self.path_lbl, 1)
+        h.addWidget(self.start_btn)
         h.addWidget(self.play_rec_btn)
         h.addWidget(self.close_btn)
         v.addWidget(self.idle_row)
+
+        # after play: what to record, the whole screen or one application
+        self.pick_row = QWidget()
+        pv = QVBoxLayout(self.pick_row)
+        pv.setContentsMargins(0, 0, 0, 0)
+        pv.setSpacing(8)
+        head = QHBoxLayout()
+        head.addWidget(QLabel("Rekam apa?"), 1)
+        self.pick_cancel = self._btn("close", tip="Batal")
+        self.pick_cancel.clicked.connect(self.cancel_pick)
+        head.addWidget(self.pick_cancel)
+        pv.addLayout(head)
+        choices = QHBoxLayout()
+        self.screen_btn = self._btn("screen", " Layar penuh", tip="Rekam seluruh layar utama")
+        self.screen_btn.clicked.connect(lambda: self._begin(None))
+        self.app_btn = self._btn("window", " Aplikasi", tip="Rekam satu aplikasi / jendela, mis. Google Meet atau Zoom")
+        self.app_btn.clicked.connect(self.choose_app)
+        choices.addWidget(self.screen_btn, 1)
+        choices.addWidget(self.app_btn, 1)
+        pv.addLayout(choices)
+        self.win_box = QWidget()
+        wv = QVBoxLayout(self.win_box)
+        wv.setContentsMargins(0, 0, 0, 0)
+        wv.setSpacing(6)
+        self.win_list = QListWidget()
+        self.win_list.setFixedHeight(150)
+        self.win_list.itemSelectionChanged.connect(lambda: self.win_start.setEnabled(bool(self.win_list.selectedItems())))
+        self.win_list.itemDoubleClicked.connect(lambda _i: self._begin_selected())
+        wv.addWidget(self.win_list)
+        self.win_note = QLabel("", objectName="status")
+        self.win_note.setWordWrap(True)
+        wv.addWidget(self.win_note)
+        wrow = QHBoxLayout()
+        self.win_refresh = QPushButton("Segarkan")
+        self.win_refresh.clicked.connect(self._fill_windows)
+        self.win_start = QPushButton(" Mulai rekam aplikasi ini", objectName="startwide")
+        self.win_start.setIcon(make_icon("play"))
+        self.win_start.setIconSize(QSize(16, 16))
+        self.win_start.setEnabled(False)
+        self.win_start.clicked.connect(self._begin_selected)
+        wrow.addWidget(self.win_refresh)
+        wrow.addWidget(self.win_start, 1)
+        wv.addLayout(wrow)
+        pv.addWidget(self.win_box)
+        v.addWidget(self.pick_row)
 
         # recording row
         self.rec_row = QWidget()
@@ -443,6 +549,9 @@ class Panel(QWidget):
         dv.addLayout(b)
         v.addWidget(self.draw_row)
 
+        self.level = LevelLine()
+        v.addWidget(self.level)
+
         self.status = QLabel("", objectName="status")
         self.status.setWordWrap(True)
         self.status.setTextFormat(Qt.TextFormat.RichText)
@@ -456,7 +565,10 @@ class Panel(QWidget):
         self.tick = QTimer(self)
         self.tick.setInterval(250)
         self.tick.timeout.connect(self.update_timer)
-        self.setFixedWidth(330)
+        self.level_timer = QTimer(self)
+        self.level_timer.setInterval(80)
+        self.level_timer.timeout.connect(self._push_levels)
+        self.setFixedWidth(370)
         self.refresh()
 
     # --- helpers ---------------------------------------------------------------------------------
@@ -490,12 +602,13 @@ class Panel(QWidget):
     def refresh(self) -> None:
         idle = self.state in ("idle", "starting")
         drawing = self.overlay is not None
-        self.folder_row.setVisible(idle)
-        self.idle_row.setVisible(idle)
+        choosing = self._choosing and self.state == "idle"
+        self.idle_row.setVisible(idle and not choosing)
+        self.pick_row.setVisible(choosing)
         self.rec_row.setVisible(not idle)
         self.draw_row.setVisible(drawing)
         self.draw_btn.setEnabled(not drawing and not idle)
-        self.path_lbl.setText(self._elide(str(self.out_dir)))
+        self.path_lbl.setText(self._short_path(self.out_dir))
         self.path_lbl.setToolTip(str(self.out_dir))
         self.pause_btn.setIcon(make_icon("play" if self.state == "paused" else "pause"))
         self.pause_btn.setToolTip("Lanjut" if self.state == "paused" else "Jeda")
@@ -503,6 +616,26 @@ class Panel(QWidget):
 
     def _elide(self, s: str, n: int = 34) -> str:
         return s if len(s) <= n else "…" + s[-(n - 1):]
+
+    @staticmethod
+    def _short_path(path: Path, n: int = 24) -> str:
+        """Last two folders, e.g. "…/Recordings/meetrec"; the full path is in the tooltip."""
+        s = str(path)
+        return s if len(s) <= n else "…/" + "/".join(path.parts[-2:])
+
+    @staticmethod
+    def _clip(s: str, n: int) -> str:
+        """Keep the beginning (the application name), cut the tail of a long window title."""
+        return s if len(s) <= n else s[:n - 1] + "…"
+
+    def _push_levels(self) -> None:
+        if not self.session or self.state != "recording":
+            self.level.push(0.0, 0.0)
+            return
+        try:
+            self.level.push(*self.session.levels())
+        except Exception:
+            self.level.push(0.0, 0.0)
 
     def update_timer(self) -> None:
         if not self.session:
@@ -522,18 +655,63 @@ class Panel(QWidget):
             self.settings.setValue("out_dir", d)
             self.refresh()
 
-    def start(self) -> None:
+    # --- what to record ------------------------------------------------------------------------------
+    def show_picker(self) -> None:
+        if self.state != "idle":
+            return
+        self._choosing = True
+        self.win_box.hide()
+        self.set_status("")
+        self.refresh()
+
+    def cancel_pick(self) -> None:
+        self._choosing = False
+        self.refresh()
+
+    def choose_app(self) -> None:
+        self.win_box.show()
+        self._fill_windows()
+        self._fit()
+
+    def _fill_windows(self) -> None:
+        self.win_list.clear()
+        wins = list_windows()
+        meeting = ("meet", "zoom", "teams", "webex", "slack", "discord")
+        wins.sort(key=lambda w: (not any(k in f"{w.app} {w.title}".lower() for k in meeting), w.app.lower()))
+        for w in wins:
+            item = QListWidgetItem(self._clip(w.label, 46))
+            item.setData(Qt.ItemDataRole.UserRole, w)
+            item.setToolTip(w.label)
+            self.win_list.addItem(item)
+        self.win_start.setEnabled(False)
+        self.win_note.setText("" if wins else "Tidak ada jendela yang bisa dipilih. Di Linux Wayland daftar jendela tidak tersedia; pakai Layar penuh.")
+        self.win_note.setVisible(not wins)
+        self._fit()
+
+    def _begin_selected(self) -> None:
+        items = self.win_list.selectedItems()
+        if items:
+            self._begin(items[0].data(Qt.ItemDataRole.UserRole))
+
+    def _begin(self, window: WindowInfo | None) -> None:
+        self._choosing = False
+        self.start(window)
+
+    def start(self, window: WindowInfo | None = None) -> None:
         from .record import Session
 
         if self.state != "idle":
             return
+        self._choosing = False
+        self._target = window
         self.session = Session(self.out_dir)
         self.state = "starting"
         self.start_btn.setEnabled(False)
         self.close_btn.setEnabled(False)
-        self.start_btn.setText(" Menyiapkan…")
-        self.set_status("Membuka mikrofon dan audio sistem…")
-        self._starter = _Starter(self.session)
+        self.start_btn.setToolTip("Menyiapkan…")
+        self.refresh()
+        self.set_status("Membuka mikrofon, audio sistem, dan layar…")
+        self._starter = _Starter(self.session, window)
         self._starter.done.connect(self._started)
         self._starter.start()
 
@@ -541,7 +719,7 @@ class Panel(QWidget):
         self._starter.wait(3000)  # run() has already returned; let the thread finish before it is dropped
         self.start_btn.setEnabled(True)
         self.close_btn.setEnabled(True)
-        self.start_btn.setText(" Mulai")
+        self.start_btn.setToolTip("Mulai rekam")
         if err:
             self.session = None
             self.state = "idle"
@@ -552,9 +730,12 @@ class Panel(QWidget):
         self._shown_errors = []
         self.video = self._starter.video
         note = self._starter.video_note
-        self.set_status(f"<span style='color:#ffb86b'>{note}</span>" if note else "")
+        where = f"Merekam jendela: {self._target.app}" if self._target and self.video else ""
+        self.set_status(f"<span style='color:#ffb86b'>{note}</span>" if note else where)
         self.update_timer()
         self.tick.start()
+        self.level.reset()
+        self.level_timer.start()
         self.refresh()
 
     def toggle_pause(self) -> None:
@@ -580,6 +761,8 @@ class Panel(QWidget):
         warn = ""
         if self.session:
             self.tick.stop()
+            self.level_timer.stop()
+            self.level.reset()
             try:
                 if self.video:
                     self.video.stop()
@@ -781,6 +964,9 @@ def _prewarm() -> None:
         pick_encoder()
         if sys.platform == "darwin":
             import catap  # noqa: F401
+        from .windows import list_windows
+
+        list_windows()  # loads Quartz now, so the application picker opens instantly
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             sc.default_microphone()

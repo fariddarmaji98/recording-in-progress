@@ -230,6 +230,12 @@ class Session:
         now = self._paused_at if self._paused_at is not None else time.monotonic()
         return max(0.0, now - self.live_from - self._paused_total)
 
+    def levels(self) -> tuple[float, float]:
+        """Latest (mic, system) peak, 0..1, for the live level line."""
+        mic = self._mic.peak if self._mic else 0.0
+        system = (self._sys or self._tapw)
+        return mic, (system.peak if system else 0.0)
+
     def errors(self) -> list[str]:
         """Per-track errors that happened after start (e.g. a device that died mid-recording)."""
         return [f"{t.label}: {t.error}" for t in self._tracks() if t.error]

@@ -16,6 +16,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .windows import WindowInfo, window_rect
+
 
 def screen_permission(request: bool = False) -> bool:
     """macOS needs Screen Recording permission, otherwise only the wallpaper is captured."""
@@ -31,6 +33,15 @@ def screen_permission(request: bool = False) -> bool:
         return False
     except Exception:
         return True
+
+
+def clamp_rect(rect: tuple[int, int, int, int], bounds: dict) -> dict:
+    """Keep a window rectangle inside the desktop so the grab never asks for pixels that do not exist."""
+    l, t, w, h = rect
+    bl, bt, bw, bh = bounds["left"], bounds["top"], bounds["width"], bounds["height"]
+    l = min(max(l, bl), bl + bw - 16)
+    t = min(max(t, bt), bt + bh - 16)
+    return {"left": l, "top": t, "width": max(16, min(w, bl + bw - l)), "height": max(16, min(h, bt + bh - t))}
 
 
 def _encoders() -> list[str]:
@@ -68,9 +79,11 @@ def pick_encoder(w: int = 128, h: int = 128, fps: int = 8) -> str:
 
 
 class ScreenRecorder(threading.Thread):
-    def __init__(self, path: Path, t0: float, fps: int = 8, monitor: int = 1):
+    def __init__(self, path: Path, t0: float, fps: int = 8, monitor: int = 1, window: WindowInfo | None = None):
         super().__init__(daemon=True, name="rec-screen")
         self.path, self.t0, self.fps, self.monitor = Path(path), t0, fps, monitor
+        self.window = window  # None = whole screen; else crop to this window and follow it
+        self._last_rect = window.rect if window else None
         self.ready = threading.Event()
         self.halt = threading.Event()
         self.paused = threading.Event()
@@ -101,17 +114,32 @@ class ScreenRecorder(threading.Thread):
             self.join(timeout)
 
     def info(self) -> dict:
+        target = ({"type": "window", "app": self.window.app, "title": self.window.title} if self.window
+                  else {"type": "screen"})
         return {"file": self.path.name, "offset_sec": round(self.offset, 3), "fps": self.fps,
                 "width": self.width, "height": self.height, "frames": self.frames,
-                "codec": self.codec, "error": self.error}
+                "codec": self.codec, "target": target, "error": self.error}
 
     # --- worker ---------------------------------------------------------------------------------
+    def _region(self, sct, mon) -> dict:
+        """What to grab now: the monitor, or the followed window's current rectangle."""
+        if not self.window:
+            return mon
+        rect = window_rect(self.window.id) or self._last_rect  # window gone: keep the last known place
+        self._last_rect = rect
+        return clamp_rect(rect, sct.monitors[0])
+
     def _next_frame(self, sct, mon) -> np.ndarray:
+        region = self._region(sct, mon)
         with self._lock:
             ov = self._override
         if ov is not None:
+            if self.window:  # the frozen full-screen image, cropped to the window
+                t, l = region["top"], region["left"]
+                crop = ov[t:t + region["height"], l:l + region["width"]]
+                return np.ascontiguousarray(crop) if crop.size else ov
             return ov
-        shot = sct.grab(mon)
+        shot = sct.grab(region)
         return np.frombuffer(shot.bgra, dtype=np.uint8).reshape(shot.height, shot.width, 4)
 
     def run(self) -> None:
@@ -123,7 +151,7 @@ class ScreenRecorder(threading.Thread):
             MSS = getattr(mss, "MSS", None) or mss.mss  # mss.mss is deprecated from 10.2
             with MSS() as sct:
                 mon = sct.monitors[self.monitor]
-                first_img = sct.grab(mon)
+                first_img = sct.grab(self._region(sct, mon))
                 w, h = first_img.width & ~1, first_img.height & ~1  # H.264 wants even sizes
                 self.width, self.height = w, h
                 self.codec = pick_encoder(w, h, self.fps)

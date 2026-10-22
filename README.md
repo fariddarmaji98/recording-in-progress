@@ -43,10 +43,14 @@ Linux: butuh `libpulse` (PulseAudio atau `pipewire-pulse`). macOS: izinkan **Mic
 
 | Keadaan | Isi panel |
 |---|---|
-| Diam | folder penyimpanan (klik ikon folder untuk ganti) · **Mulai** · **Tutup** |
+| Awal | satu baris: ikon folder + jalur penyimpanan (klik untuk ganti) · **▶ mulai** · **daftar rekaman / player** · **✕ tutup**. Garis di bawahnya = level suara langsung. |
+| Klik ▶ | pilihan **Layar penuh** atau **Aplikasi** (daftar jendela yang terbuka; Zoom, Meet, Teams, dan sejenisnya diurutkan paling atas). Klik dua kali atau pilih lalu **Mulai rekam aplikasi ini**. |
 | Merekam | menit berjalan · **Gambar** · **Jeda** · **Stop**. Tombol Tutup hilang, dan jendela menolak ditutup. |
 | Mode gambar | + pensil / teks · 6 warna · ketebalan · urungkan · **simpan** · **hapus** |
 
+- **Level suara:** garis bergelombang di bawah baris tombol: **hijau = mikrofon, biru = suara sistem**. Kalau garis biru datar saat ada suara diputar, audio sistem tidak masuk.
+- **Rekam aplikasi:** video dipotong ke persegi panjang jendela itu dan mengikutinya kalau dipindah (ukuran video tetap sama seperti saat mulai; kalau jendela diubah ukurannya, gambar ikut diskalakan). Jendela harus tetap terlihat di depan: yang menutupinya ikut terekam. **Audio tetap seluruh suara sistem + mic**, bukan audio per aplikasi.
+  macOS: daftar jendela lewat Quartz (judul jendela butuh izin Screen Recording). Windows: Win32 (ctypes). Linux: X11 lewat `python-xlib`; di Wayland daftar jendela tidak tersedia, pakai Layar penuh.
 - **Gambar:** layar dibekukan dengan screenshot lalu kamu coret di atasnya. Simpan → `drawings/drawing_<jam>.png` di folder rekaman;
   hapus → dibuang. Keduanya menutup mode gambar. Rekaman audio jalan terus.
 - **Esc** menutup mode gambar tanpa menyimpan (sama dengan tombol hapus). Esc saat mengetik teks hanya membatalkan teks itu.
