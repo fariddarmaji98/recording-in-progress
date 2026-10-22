@@ -275,6 +275,27 @@ class DrawOverlay(QWidget):
             self._commit_text()
 
 
+class ElidedLabel(QLabel):
+    """Shows as much of a long text as fits, cutting the middle ("/Users/em…/meetrec")."""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self._full = ""
+        self.setMinimumWidth(40)
+        self.setSizePolicy(self.sizePolicy().horizontalPolicy().Ignored, self.sizePolicy().verticalPolicy())
+
+    def setFullText(self, text: str) -> None:
+        self._full = text
+        self._apply()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._apply()
+
+    def _apply(self) -> None:
+        self.setText(self.fontMetrics().elidedText(self._full, Qt.TextElideMode.ElideMiddle, max(10, self.width())))
+
+
 class LevelLine(QWidget):
     """Thin live waveform: green = microphone, blue = system sound. Flat when nothing is recorded."""
 
@@ -422,7 +443,7 @@ class Panel(QWidget):
         h.setSpacing(8)
         self.folder_btn = self._btn("folder", tip="Pilih folder penyimpanan")
         self.folder_btn.clicked.connect(self.choose_folder)
-        self.path_lbl = QLabel(objectName="path")
+        self.path_lbl = ElidedLabel(objectName="path")
         self.start_btn = QPushButton(objectName="start")
         self.start_btn.setIcon(make_icon("play"))
         self.start_btn.setIconSize(QSize(22, 22))
@@ -608,7 +629,7 @@ class Panel(QWidget):
         self.rec_row.setVisible(not idle)
         self.draw_row.setVisible(drawing)
         self.draw_btn.setEnabled(not drawing and not idle)
-        self.path_lbl.setText(self._short_path(self.out_dir))
+        self.path_lbl.setFullText(str(self.out_dir))
         self.path_lbl.setToolTip(str(self.out_dir))
         self.pause_btn.setIcon(make_icon("play" if self.state == "paused" else "pause"))
         self.pause_btn.setToolTip("Lanjut" if self.state == "paused" else "Jeda")
