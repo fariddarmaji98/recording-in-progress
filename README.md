@@ -46,8 +46,11 @@ Linux: butuh `libpulse` (PulseAudio atau `pipewire-pulse`). macOS: izinkan **Mic
 
 - **Gambar:** layar dibekukan dengan screenshot lalu kamu coret di atasnya. Simpan → `drawings/drawing_<jam>.png` di folder rekaman;
   hapus → dibuang. Keduanya menutup mode gambar. Rekaman audio jalan terus.
+- **Esc** menutup mode gambar tanpa menyimpan (sama dengan tombol hapus). Esc saat mengetik teks hanya membatalkan teks itu.
+- **Panel tetap terlihat:** selama mode gambar, panel menempel di dalam layar gambar (bisa digeser), jadi tidak tertutup coretan atau layar beku.
 - **Tanpa screenshot:** kalau OS menolak screenshot (Wayland, atau izin Screen Recording macOS belum diberikan),
   layar tidak dibekukan: kamu mencoret langsung di atas layar yang hidup, dan PNG-nya hanya berisi coretan (latar transparan).
+- **Mulai:** perangkat dibuka di background, jadi panel tidak membeku. Timer baru berjalan setelah mic dan audio sistem siap; `meta.json` mencatat `ready_sec` dan `offset_sec` tiap track.
 - **Jeda:** audio selama jeda dibuang dari kedua track, jadi keduanya tetap sejajar. `meta.json` mencatat tiap jeda.
 
 ## Pakai: baris perintah

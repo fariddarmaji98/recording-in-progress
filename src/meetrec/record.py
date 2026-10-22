@@ -150,6 +150,7 @@ class Session:
         self.mic_name, self.speaker_name = mic_name, speaker_name
         self.started_at = datetime.now()
         self.t0 = 0.0
+        self.live_from: float | None = None  # monotonic time when every device was ready
         self._mic: _WavThread | None = None
         self._sys: _WavThread | None = None
         self._tapw: _TapWriter | None = None
@@ -198,6 +199,7 @@ class Session:
             if t.error:
                 self.stop()
                 raise RuntimeError(f"{t.label}: {t.error}") from t.error
+        self.live_from = time.monotonic()
 
     @property
     def paused(self) -> bool:
@@ -221,9 +223,11 @@ class Session:
             t.paused.clear()
 
     def active_seconds(self) -> float:
-        """Recorded time, excluding pauses."""
+        """Recorded time since the devices were ready, excluding pauses."""
+        if self.live_from is None:
+            return 0.0
         now = self._paused_at if self._paused_at is not None else time.monotonic()
-        return max(0.0, now - self.t0 - self._paused_total)
+        return max(0.0, now - self.live_from - self._paused_total)
 
     def errors(self) -> list[str]:
         """Per-track errors that happened after start (e.g. a device that died mid-recording)."""
@@ -266,6 +270,7 @@ class Session:
             for t in self._tracks()
         }
         meta = {"started_at": self.started_at.isoformat(timespec="seconds"), "platform": sys.platform,
+                "ready_sec": round((self.live_from or self.t0) - self.t0, 3),
                 "duration_sec": round(self.active_seconds(), 3), "pauses": self._pauses, "tracks": tracks}
         (self.dir / "meta.json").write_text(json.dumps(meta, indent=1))
         return self.dir

@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import signal
 import sys
+import threading
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QRectF, QSettings, QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QPointF, QRectF, QSettings, QSize, Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import (QColor, QDesktopServices, QFont, QGuiApplication, QIcon, QImage, QPainter,
                            QPainterPath, QPen, QPixmap, QPolygonF)
 from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
@@ -105,6 +106,8 @@ class _TextEdit(QLineEdit):
 class DrawOverlay(QWidget):
     """Full-screen canvas over a frozen screenshot (or transparent when no screenshot)."""
 
+    escape = Signal()  # Esc pressed: leave drawing mode
+
     def __init__(self, screen, shot: QPixmap | None):
         super().__init__(None, _W.Tool | _W.FramelessWindowHint | _W.WindowStaysOnTopHint)
         self.shot = shot
@@ -113,6 +116,7 @@ class DrawOverlay(QWidget):
         self.setAttribute(_A.WA_MacAlwaysShowToolWindow, True)
         self.setGeometry(screen.geometry())
         self.setCursor(Qt.CursorShape.CrossCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.items: list[dict] = []
         self.tool, self.color, self.width_px = "pencil", QColor(COLORS[0]), 4
         self._cur: dict | None = None
@@ -187,6 +191,12 @@ class DrawOverlay(QWidget):
         self._cur = None
 
     def keyPressEvent(self, e):
+        if e.key() == Qt.Key.Key_Escape:
+            if self._edit:
+                self._cancel_text()
+            else:
+                self.escape.emit()
+            return
         if e.key() == Qt.Key.Key_Z and e.modifiers() & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier):
             self.undo()
 
@@ -235,6 +245,23 @@ class DrawOverlay(QWidget):
             self._commit_text()
 
 
+class _Starter(QThread):
+    """Opens the devices off the UI thread (CoreAudio can take seconds), then reports ok or an error."""
+
+    done = Signal(str)  # "" = ok, else the error text
+
+    def __init__(self, session):
+        super().__init__()
+        self.session = session
+
+    def run(self):
+        try:
+            self.session.start()
+            self.done.emit("")
+        except Exception as e:
+            self.done.emit(str(e))
+
+
 # --- panel ---------------------------------------------------------------------------------------
 STYLE = f"""
 #card {{ background: #1c2029; border-radius: 14px; border: 1px solid #2c3242; }}
@@ -267,6 +294,7 @@ class Panel(QWidget):
         self.session = None
         self.overlay: DrawOverlay | None = None
         self._placed = False
+        self._top_left = self.pos()
         self._shown_errors: list[str] = []
 
         outer = QVBoxLayout(self)
@@ -372,6 +400,10 @@ class Panel(QWidget):
         self.status.linkActivated.connect(lambda url: QDesktopServices.openUrl(QUrl.fromLocalFile(url)))
         v.addWidget(self.status)
 
+        for w in self.findChildren(QPushButton) + self.findChildren(QSlider):
+            w.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # keep keyboard focus on the canvas (Esc, Ctrl+Z)
+        self._drag_off = None
+
         self.tick = QTimer(self)
         self.tick.setInterval(250)
         self.tick.timeout.connect(self.update_timer)
@@ -407,7 +439,7 @@ class Panel(QWidget):
         self._fit()
 
     def refresh(self) -> None:
-        idle = self.state == "idle"
+        idle = self.state in ("idle", "starting")
         drawing = self.overlay is not None
         self.folder_row.setVisible(idle)
         self.idle_row.setVisible(idle)
@@ -444,14 +476,27 @@ class Panel(QWidget):
     def start(self) -> None:
         from .record import Session
 
-        self.set_status("Menyiapkan perekam…")
-        QApplication.processEvents()
-        try:
-            self.session = Session(self.out_dir)
-            self.session.start()
-        except Exception as e:
+        if self.state != "idle":
+            return
+        self.session = Session(self.out_dir)
+        self.state = "starting"
+        self.start_btn.setEnabled(False)
+        self.close_btn.setEnabled(False)
+        self.start_btn.setText(" Menyiapkan…")
+        self.set_status("Membuka mikrofon dan audio sistem…")
+        self._starter = _Starter(self.session)
+        self._starter.done.connect(self._started)
+        self._starter.start()
+
+    def _started(self, err: str) -> None:
+        self.start_btn.setEnabled(True)
+        self.close_btn.setEnabled(True)
+        self.start_btn.setText(" Mulai")
+        if err:
             self.session = None
-            self.set_status(f"Gagal mulai: {e}", error=True)
+            self.state = "idle"
+            self.refresh()
+            self.set_status(f"Gagal mulai: {err}", error=True)
             return
         self.state = "recording"
         self._shown_errors = []
@@ -500,6 +545,7 @@ class Panel(QWidget):
         if self.overlay or not self.session:
             return
         screen = self.screen() or QGuiApplication.primaryScreen()
+        self._top_left = self.pos()  # global position of the panel, restored when drawing ends
         self.hide()
         QApplication.processEvents()
         QTimer.singleShot(220, lambda: self._open_overlay(screen))
@@ -519,10 +565,19 @@ class Panel(QWidget):
         for s, col in zip(self.swatches, COLORS):
             if s.isChecked():
                 self.overlay.color = QColor(col)
-        self.overlay.show()
+        ov = self.overlay
+        ov.escape.connect(self.discard_drawing)
+        # The panel lives INSIDE the overlay while drawing. As a separate window it got covered the
+        # moment the overlay was clicked (the OS raises the clicked window).
+        local = self._top_left - screen.geometry().topLeft()
+        self.setParent(ov)
+        self.setAttribute(_A.WA_TranslucentBackground, False)
+        self.move(local)
+        ov.show()
         self.show()
         self.raise_()
-        self.activateWindow()
+        ov.activateWindow()
+        ov.setFocus()
         self.set_status(note)
         self.refresh()
 
@@ -556,34 +611,76 @@ class Panel(QWidget):
         self.set_status(f"Gambar disimpan: drawings/{path.name}" if ok else "Gagal menyimpan gambar", error=not ok)
 
     def discard_drawing(self) -> None:
+        had = bool(self.overlay and self.overlay.items)
         self._close_overlay()
-        self.set_status("Gambar dihapus")
+        self.set_status("Gambar dihapus" if had else "Mode gambar ditutup")
 
     def _close_overlay(self) -> None:
-        if self.overlay:
-            self.overlay.close()
-            self.overlay.deleteLater()
-            self.overlay = None
+        ov, self.overlay = self.overlay, None
+        if ov:
+            gpos = ov.mapToGlobal(self.pos()) if self.parent() is ov else self._top_left
+            self.hide()
+            # take the panel out of the overlay BEFORE closing it, or it is deleted with its parent
+            self.setParent(None, _W.Tool | _W.FramelessWindowHint | _W.WindowStaysOnTopHint)
+            self.setAttribute(_A.WA_TranslucentBackground, True)
+            self.setAttribute(_A.WA_MacAlwaysShowToolWindow, True)
+            self.move(gpos)
+            ov.close()
+            ov.deleteLater()
         self.refresh()
         self.show()
         self.raise_()
 
     # --- window ----------------------------------------------------------------------------------
     def mousePressEvent(self, e):
-        if e.button() == Qt.MouseButton.LeftButton and self.windowHandle():
-            self.windowHandle().startSystemMove()
+        if e.button() != Qt.MouseButton.LeftButton:
+            return
+        if self.isWindow():
+            if self.windowHandle():
+                self.windowHandle().startSystemMove()
+        else:
+            self._drag_off = e.position()
+
+    def mouseMoveEvent(self, e):
+        if self._drag_off is not None and not self.isWindow() and e.buttons() & Qt.MouseButton.LeftButton:
+            top_left = (self.mapToParent(e.position()) - self._drag_off).toPoint()
+            par = self.parentWidget()
+            x = max(0, min(top_left.x(), par.width() - self.width()))
+            y = max(0, min(top_left.y(), par.height() - self.height()))
+            self.move(x, y)
+
+    def mouseReleaseEvent(self, _):
+        self._drag_off = None
 
     def closeEvent(self, e):
-        if self.state != "idle":
+        if self.state != "idle":  # recording, paused or still starting
             e.ignore()  # no closing while recording
             return
         super().closeEvent(e)
+
+
+def _prewarm() -> None:
+    """Load the capture libraries and query the devices before the first click on Mulai."""
+    try:
+        import warnings
+
+        import soundcard as sc
+        import soxr  # noqa: F401
+        if sys.platform == "darwin":
+            import catap  # noqa: F401
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            sc.default_microphone()
+            sc.default_speaker()
+    except Exception:
+        pass
 
 
 def run() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName("meetrec")
     app.setQuitOnLastWindowClosed(False)
+    threading.Thread(target=_prewarm, daemon=True).start()
     panel = Panel()
     panel.show()
     panel.place_top_right()
