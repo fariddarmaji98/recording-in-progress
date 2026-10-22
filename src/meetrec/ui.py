@@ -382,14 +382,14 @@ class SettingsDialog(QDialog):
         self.video.setChecked(settings.value("record_video", True, type=bool))
         self.fps = QComboBox()
         for f in VIDEO_FPS:
-            self.fps.addItem(f"{f} frame per detik", f)
+            self.fps.addItem(f"{f} fps", f)
         self.fps.setCurrentIndex(max(0, self.fps.findData(settings.value("video_fps", 8, type=int))))
         self.rate = QComboBox()
         for r, label in AUDIO_RATES:
             self.rate.addItem(label, r)
         self.rate.setCurrentIndex(max(0, self.rate.findData(settings.value("audio_rate", 16000, type=int))))
         form.addRow(self.video)
-        form.addRow("Kecepatan video", self.fps)
+        form.addRow("FPS video", self.fps)
         form.addRow("Kualitas audio", self.rate)
         buttons = QHBoxLayout()
         buttons.addStretch(1)
