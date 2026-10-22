@@ -635,6 +635,18 @@ class Panel(QWidget):
         if right is not None:
             self.move(right - self.width(), self.y())
 
+    def place_center(self) -> None:
+        """Exact middle of the whole screen the panel is on (used when the app starts)."""
+        g = (self.screen() or QGuiApplication.primaryScreen()).geometry()
+        self.adjustSize()
+        self.move(g.center().x() - self.width() // 2, g.center().y() - self.height() // 2)
+        self._placed = True
+
+    def show_initial(self) -> None:
+        """First appearance at launch: shown in the center of the screen."""
+        self.show()
+        self.place_center()
+
     def place_top_right(self) -> None:
         g = (self.screen() or QGuiApplication.primaryScreen()).availableGeometry()
         self.adjustSize()
@@ -1057,8 +1069,7 @@ def run() -> None:
     app.setQuitOnLastWindowClosed(False)
     threading.Thread(target=_prewarm, daemon=True).start()
     panel = Panel()
-    panel.show()
-    panel.place_top_right()
+    panel.show_initial()
     exclude_from_capture(panel)
     def finish_recording():
         panel.shutdown()
