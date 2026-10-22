@@ -21,8 +21,8 @@ import numpy as np
 from PySide6.QtCore import QPointF, QRectF, QSettings, QSize, Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import (QColor, QDesktopServices, QFont, QGuiApplication, QIcon, QImage, QPainter,
                            QPainterPath, QPen, QPixmap, QPolygonF)
-from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-                               QListWidgetItem, QPushButton, QSlider, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QFrame, QHBoxLayout,
+                               QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QSlider, QVBoxLayout, QWidget)
 
 from .paths import DEFAULT_OUT
 from .screen import ScreenRecorder, screen_permission
@@ -86,6 +86,14 @@ def make_icon(name: str, color: str = FG) -> QIcon:
         p.drawRoundedRect(QRectF(7, 14, 26, 22), 3, 3)
         p.drawLine(7, 21, 33, 21)
         p.drawRoundedRect(QRectF(17, 8, 24, 18), 3, 3)
+    elif name == "gear":
+        import math
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        for k in range(8):  # teeth
+            a = k * math.pi / 4
+            p.drawLine(int(24 + 11 * math.cos(a)), int(24 + 11 * math.sin(a)), int(24 + 17 * math.cos(a)), int(24 + 17 * math.sin(a)))
+        p.drawEllipse(QPointF(24, 24), 11, 11)
+        p.drawEllipse(QPointF(24, 24), 4.5, 4.5)
     elif name == "text":
         p.drawLine(12, 12, 36, 12)
         p.drawLine(24, 12, 24, 38)
@@ -275,25 +283,46 @@ class DrawOverlay(QWidget):
             self._commit_text()
 
 
-class ElidedLabel(QLabel):
-    """Shows as much of a long text as fits, cutting the middle ("/Users/em…/meetrec")."""
+class IconButton(QPushButton):
+    """THE icon-only button of the panel: always an exact SIZE x SIZE square, icon centred.
+    tone: "default" | "primary" (green) | "danger" (red). Every icon button in the UI is one of these."""
 
-    def __init__(self, *a, **kw):
-        super().__init__(*a, **kw)
-        self._full = ""
-        self.setMinimumWidth(40)
-        self.setSizePolicy(self.sizePolicy().horizontalPolicy().Ignored, self.sizePolicy().verticalPolicy())
+    SIZE = 36
+    ICON = 20
 
-    def setFullText(self, text: str) -> None:
-        self._full = text
-        self._apply()
+    def __init__(self, icon: str, tip: str = "", tone: str = "default", checkable: bool = False):
+        super().__init__()
+        self.setIcon(make_icon(icon))
+        self.setIconSize(QSize(self.ICON, self.ICON))
+        self.setFixedSize(self.SIZE, self.SIZE)
+        self.setToolTip(tip)
+        self.setCheckable(checkable)
+        self.setProperty("square", True)
+        self.setProperty("tone", tone)
 
-    def resizeEvent(self, e):
-        super().resizeEvent(e)
-        self._apply()
 
-    def _apply(self) -> None:
-        self.setText(self.fontMetrics().elidedText(self._full, Qt.TextElideMode.ElideMiddle, max(10, self.width())))
+class PathLabel(QLabel):
+    """The full storage path (wraps after "/" when long). Clicking it opens the folder chooser."""
+
+    clicked = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self.setWordWrap(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("Klik untuk ganti folder penyimpanan")
+
+    def setPath(self, path: str) -> None:
+        self.setText(path.replace("/", "/\u200b").replace("\\", "\\\u200b"))  # zero-width break points
+
+    def path(self) -> str:
+        return self.text().replace("\u200b", "")
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        else:
+            super().mousePressEvent(e)
 
 
 class LevelLine(QWidget):
@@ -336,15 +365,64 @@ class LevelLine(QWidget):
                 p.drawLine(x, int(mid - a), x, int(mid + a))
 
 
+AUDIO_RATES = [(16000, "16 kHz: hemat tempat, cukup untuk suara"), (24000, "24 kHz"), (48000, "48 kHz: kualitas tertinggi")]
+VIDEO_FPS = [4, 8, 15]
+
+
+class SettingsDialog(QDialog):
+    """Recording options. They are stored in QSettings and read when a recording starts."""
+
+    def __init__(self, settings: QSettings, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Pengaturan")
+        self.setModal(True)
+        self.setMinimumWidth(360)
+        form = QFormLayout()
+        self.video = QCheckBox("Rekam layar (video.mp4)")
+        self.video.setChecked(settings.value("record_video", True, type=bool))
+        self.fps = QComboBox()
+        for f in VIDEO_FPS:
+            self.fps.addItem(f"{f} frame per detik", f)
+        self.fps.setCurrentIndex(max(0, self.fps.findData(settings.value("video_fps", 8, type=int))))
+        self.rate = QComboBox()
+        for r, label in AUDIO_RATES:
+            self.rate.addItem(label, r)
+        self.rate.setCurrentIndex(max(0, self.rate.findData(settings.value("audio_rate", 16000, type=int))))
+        form.addRow(self.video)
+        form.addRow("Kecepatan video", self.fps)
+        form.addRow("Kualitas audio", self.rate)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        cancel = QPushButton("Batal")
+        cancel.clicked.connect(self.reject)
+        self.save = QPushButton("Simpan")
+        self.save.setDefault(True)
+        self.save.clicked.connect(self.accept)
+        buttons.addWidget(cancel)
+        buttons.addWidget(self.save)
+        v = QVBoxLayout(self)
+        v.addLayout(form)
+        v.addLayout(buttons)
+        self.video.toggled.connect(self.fps.setEnabled)
+        self.fps.setEnabled(self.video.isChecked())
+
+    def store(self, settings: QSettings) -> None:
+        settings.setValue("record_video", self.video.isChecked())
+        settings.setValue("video_fps", self.fps.currentData())
+        settings.setValue("audio_rate", self.rate.currentData())
+
+
 class _Starter(QThread):
     """Opens the devices off the UI thread (CoreAudio can take seconds), then reports ok or an error."""
 
     done = Signal(str)  # "" = ok, else the error text
 
-    def __init__(self, session, window: WindowInfo | None = None):
+    def __init__(self, session, window: WindowInfo | None = None, video: bool = True, fps: int = 8):
         super().__init__()
         self.session = session
         self.window = window
+        self.want_video = video
+        self.fps = fps
         self.video: ScreenRecorder | None = None
         self.video_note = ""
 
@@ -356,11 +434,13 @@ class _Starter(QThread):
         v = None
         self.session.dir.mkdir(parents=True, exist_ok=True)  # the video thread writes here before audio starts
         try:
-            if not screen_permission(request=True):
+            if not self.want_video:
+                pass  # turned off in Pengaturan: audio only
+            elif not screen_permission(request=True):
                 self.video_note = ("Izin Screen Recording belum diberikan, jadi layar tidak direkam (audio tetap jalan). "
                                    "Beri izin lalu buka ulang aplikasi.")
             else:
-                v = ScreenRecorder(self.session.dir / "video.mp4", t0, window=self.window)
+                v = ScreenRecorder(self.session.dir / "video.mp4", t0, fps=self.fps, window=self.window)
                 v.start()
         except Exception as e:
             self.video_note = f"Video gagal: {e}"
@@ -393,15 +473,20 @@ QPushButton {{ background: #2a3040; color: {FG}; border: none; border-radius: 8p
 QPushButton:hover {{ background: #384058; }}
 QPushButton:disabled {{ background: #232836; color: #5d667c; }}
 QPushButton:checked {{ background: #4a6cf7; }}
-#start {{ background: #2ea043; padding: 0; }}
-#start:hover {{ background: #3bb653; }}
+QPushButton[square="true"] {{ padding: 0; }}
+QPushButton[tone="primary"] {{ background: #2ea043; }}
+QPushButton[tone="primary"]:hover {{ background: #3bb653; }}
+QPushButton[tone="primary"]:disabled {{ background: #1f5a2c; }}
+QPushButton[tone="danger"] {{ background: #d03b3b; }}
+QPushButton[tone="danger"]:hover {{ background: #e24c4c; }}
+#section {{ border: 1px solid #2c3242; border-radius: 10px; background: transparent; }}
+QCheckBox {{ color: {FG}; }}
+QComboBox {{ background: #2a3040; border: none; border-radius: 8px; padding: 5px 10px; color: {FG}; }}
 #startwide {{ background: #2ea043; font-weight: 600; padding: 7px 14px; }}
 #startwide:hover {{ background: #3bb653; }}
 QListWidget {{ background: #232836; border: none; border-radius: 8px; color: {FG}; padding: 4px; }}
 QListWidget::item {{ padding: 5px 6px; border-radius: 6px; }}
 QListWidget::item:selected {{ background: #4a6cf7; }}
-#stop {{ background: #d03b3b; }}
-#stop:hover {{ background: #e24c4c; }}
 QSlider::groove:horizontal {{ height: 4px; background: #3a4258; border-radius: 2px; }}
 QSlider::handle:horizontal {{ width: 14px; margin: -6px 0; border-radius: 7px; background: {FG}; }}
 """
@@ -435,30 +520,41 @@ class Panel(QWidget):
         v.setContentsMargins(12, 10, 12, 10)
         v.setSpacing(8)
 
-        # first screen (as sketched): folder + path | green play | list | close
+        # first screen: two sections, stacked. Top: where recordings are stored (full path). Bottom: actions.
         self.idle_row = QWidget()
-        self.folder_row = self.idle_row  # older name for the same row
-        h = QHBoxLayout(self.idle_row)
-        h.setContentsMargins(0, 0, 0, 0)
+        self.folder_row = self.idle_row  # older name for the same container
+        iv = QVBoxLayout(self.idle_row)
+        iv.setContentsMargins(0, 0, 0, 0)
+        iv.setSpacing(8)
+
+        self.storage_section = QFrame(objectName="section")
+        h = QHBoxLayout(self.storage_section)
+        h.setContentsMargins(8, 8, 8, 8)
         h.setSpacing(8)
-        self.folder_btn = self._btn("folder", tip="Pilih folder penyimpanan")
+        self.folder_btn = IconButton("folder", "Pilih folder penyimpanan")
         self.folder_btn.clicked.connect(self.choose_folder)
-        self.path_lbl = ElidedLabel(objectName="path")
-        self.start_btn = QPushButton(objectName="start")
-        self.start_btn.setIcon(make_icon("play"))
-        self.start_btn.setIconSize(QSize(22, 22))
-        self.start_btn.setFixedSize(46, 34)
-        self.start_btn.setToolTip("Mulai rekam")
-        self.start_btn.clicked.connect(self.show_picker)
-        self.play_rec_btn = self._btn("list", tip="Daftar rekaman / putar")
-        self.play_rec_btn.clicked.connect(self.open_player)
-        self.close_btn = self._btn("close", tip="Tutup aplikasi")
-        self.close_btn.clicked.connect(QApplication.quit)
+        self.path_lbl = PathLabel()
+        self.path_lbl.clicked.connect(self.choose_folder)
         h.addWidget(self.folder_btn)
         h.addWidget(self.path_lbl, 1)
-        h.addWidget(self.start_btn)
-        h.addWidget(self.play_rec_btn)
-        h.addWidget(self.close_btn)
+        iv.addWidget(self.storage_section)
+
+        self.actions_section = QFrame(objectName="section")
+        h = QHBoxLayout(self.actions_section)
+        h.setContentsMargins(8, 8, 8, 8)
+        h.setSpacing(8)
+        self.start_btn = IconButton("play", "Mulai rekam", tone="primary")
+        self.start_btn.clicked.connect(self.show_picker)
+        self.play_rec_btn = IconButton("list", "Daftar rekaman / putar")
+        self.play_rec_btn.clicked.connect(self.open_player)
+        self.settings_btn = IconButton("gear", "Pengaturan")
+        self.settings_btn.clicked.connect(self.open_settings)
+        self.close_btn = IconButton("close", "Tutup aplikasi")
+        self.close_btn.clicked.connect(QApplication.quit)
+        h.addStretch(1)
+        for btn in (self.start_btn, self.play_rec_btn, self.settings_btn, self.close_btn):
+            h.addWidget(btn)
+        iv.addWidget(self.actions_section)
         v.addWidget(self.idle_row)
 
         # after play: what to record, the whole screen or one application
@@ -468,7 +564,7 @@ class Panel(QWidget):
         pv.setSpacing(8)
         head = QHBoxLayout()
         head.addWidget(QLabel("Rekam apa?"), 1)
-        self.pick_cancel = self._btn("close", tip="Batal")
+        self.pick_cancel = IconButton("close", "Batal")
         self.pick_cancel.clicked.connect(self.cancel_pick)
         head.addWidget(self.pick_cancel)
         pv.addLayout(head)
@@ -513,9 +609,9 @@ class Panel(QWidget):
         self.timer_lbl = QLabel("00:00", objectName="timer")
         self.draw_btn = self._btn("pencil", " Gambar")
         self.draw_btn.clicked.connect(self.enter_draw)
-        self.pause_btn = self._btn("pause", tip="Jeda")
+        self.pause_btn = IconButton("pause", "Jeda")
         self.pause_btn.clicked.connect(self.toggle_pause)
-        self.stop_btn = self._btn("stop", tip="Stop", name="stop")
+        self.stop_btn = IconButton("stop", "Stop", tone="danger")
         self.stop_btn.clicked.connect(self.stop)
         h.addWidget(self.timer_lbl, 1)
         h.addWidget(self.draw_btn)
@@ -529,8 +625,8 @@ class Panel(QWidget):
         dv.setContentsMargins(0, 0, 0, 0)
         dv.setSpacing(6)
         a = QHBoxLayout()
-        self.pencil_btn = self._btn("pencil", tip="Pensil", checkable=True)
-        self.text_btn = self._btn("text", tip="Teks", checkable=True)
+        self.pencil_btn = IconButton("pencil", "Pensil", checkable=True)
+        self.text_btn = IconButton("text", "Teks", checkable=True)
         self.pencil_btn.setChecked(True)
         self.pencil_btn.clicked.connect(lambda: self.set_tool("pencil"))
         self.text_btn.clicked.connect(lambda: self.set_tool("text"))
@@ -556,11 +652,11 @@ class Panel(QWidget):
         self.size_slider.setRange(1, 24)
         self.size_slider.setValue(4)
         self.size_slider.valueChanged.connect(self.set_width)
-        self.undo_btn = self._btn("undo", tip="Urungkan")
+        self.undo_btn = IconButton("undo", "Urungkan")
         self.undo_btn.clicked.connect(lambda: self.overlay and self.overlay.undo())
-        self.save_btn = self._btn("save", tip="Simpan gambar")
+        self.save_btn = IconButton("save", "Simpan gambar")
         self.save_btn.clicked.connect(self.save_drawing)
-        self.trash_btn = self._btn("trash", tip="Hapus gambar")
+        self.trash_btn = IconButton("trash", "Hapus gambar")
         self.trash_btn.clicked.connect(self.discard_drawing)
         b.addWidget(self.size_lbl)
         b.addWidget(self.size_slider, 1)
@@ -577,6 +673,7 @@ class Panel(QWidget):
         self.status.setWordWrap(True)
         self.status.setTextFormat(Qt.TextFormat.RichText)
         self.status.linkActivated.connect(lambda url: QDesktopServices.openUrl(QUrl.fromLocalFile(url)))
+        self.status.hide()  # shown only when there is something to say, so no blank strip under the buttons
         v.addWidget(self.status)
 
         for w in self.findChildren(QPushButton) + self.findChildren(QSlider):
@@ -599,6 +696,7 @@ class Panel(QWidget):
         b.setIconSize(QSize(18, 18))
         b.setToolTip(tip)
         b.setCheckable(checkable)
+        b.setFixedHeight(IconButton.SIZE)  # same height as the square buttons beside it
         if name:
             b.setObjectName(name)
         return b
@@ -629,20 +727,14 @@ class Panel(QWidget):
         self.rec_row.setVisible(not idle)
         self.draw_row.setVisible(drawing)
         self.draw_btn.setEnabled(not drawing and not idle)
-        self.path_lbl.setFullText(str(self.out_dir))
-        self.path_lbl.setToolTip(str(self.out_dir))
+        self.path_lbl.setPath(str(self.out_dir))
+        self.level.setVisible(self.state in ("recording", "paused"))  # no empty strip on the first screen
         self.pause_btn.setIcon(make_icon("play" if self.state == "paused" else "pause"))
         self.pause_btn.setToolTip("Lanjut" if self.state == "paused" else "Jeda")
         self._fit()
 
     def _elide(self, s: str, n: int = 34) -> str:
         return s if len(s) <= n else "…" + s[-(n - 1):]
-
-    @staticmethod
-    def _short_path(path: Path, n: int = 24) -> str:
-        """Last two folders, e.g. "…/Recordings/meetrec"; the full path is in the tooltip."""
-        s = str(path)
-        return s if len(s) <= n else "…/" + "/".join(path.parts[-2:])
 
     @staticmethod
     def _clip(s: str, n: int) -> str:
@@ -725,14 +817,15 @@ class Panel(QWidget):
             return
         self._choosing = False
         self._target = window
-        self.session = Session(self.out_dir)
+        self.session = Session(self.out_dir, rate=self.settings.value("audio_rate", 16000, type=int))
         self.state = "starting"
         self.start_btn.setEnabled(False)
         self.close_btn.setEnabled(False)
         self.start_btn.setToolTip("Menyiapkan…")
         self.refresh()
         self.set_status("Membuka mikrofon, audio sistem, dan layar…")
-        self._starter = _Starter(self.session, window)
+        self._starter = _Starter(self.session, window, video=self.settings.value("record_video", True, type=bool),
+                                 fps=self.settings.value("video_fps", 8, type=int))
         self._starter.done.connect(self._started)
         self._starter.start()
 
@@ -919,6 +1012,14 @@ class Panel(QWidget):
         self.show()
         self.raise_()
         exclude_from_capture(self)  # the native window was recreated
+
+    def open_settings(self) -> None:
+        if self.state != "idle":
+            return
+        dlg = SettingsDialog(self.settings, self)
+        if dlg.exec():
+            dlg.store(self.settings)
+            self.set_status("Pengaturan disimpan; berlaku di rekaman berikutnya.")
 
     def open_player(self) -> None:
         from .player import PlayerWindow

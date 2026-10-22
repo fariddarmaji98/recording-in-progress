@@ -50,6 +50,8 @@ class _Track:
         self.peak = 0.0       # latest block (live meter)
         self.max_peak = 0.0   # whole run (silent-track detection)
         self.device_name = ""
+        self.gap_sec = 0.0    # silence inserted where the device delivered less audio than the clock says
+        self.gaps = 0
         self.error: Exception | None = None
 
     def _meter(self, mono: np.ndarray) -> None:
@@ -82,12 +84,37 @@ class _WavThread(_Track, threading.Thread):
                     w.setframerate(self.rate)
                     self.offset = time.monotonic() - self.t0
                     self.ready.set()
+                    started = time.monotonic()
+                    paused_acc, paused_at, written, live_streak = 0.0, None, 0, 0
                     while not self.halt.is_set():
+                        before = time.monotonic()
                         block = rec.record(numframes=n)
+                        now = time.monotonic()
                         mono = block.mean(axis=1) if block.ndim == 2 else block
                         self._meter(mono)
-                        if not self.paused.is_set():
-                            w.writeframes(_to_int16(mono))
+                        if self.paused.is_set():
+                            paused_at = paused_at if paused_at is not None else before
+                            continue
+                        if paused_at is not None:
+                            paused_acc += before - paused_at
+                            paused_at = None
+                        w.writeframes(_to_int16(mono))
+                        written += len(mono)
+                        # Timeline guard. Reads that take about one block (0.6x..3x) mean we are at the live edge
+                        # with no backlog. If we are still behind the clock after 3 such reads in a row, the device
+                        # lost that audio (seen in a 24 min recording: mic 37 s short). Fill the hole with silence
+                        # so mic.wav stays aligned with system.wav and the video. A stall that only piled audio up
+                        # in the queue gives instant reads while it drains, which resets the streak, so real audio
+                        # is never replaced by silence or duplicated.
+                        took, blk = now - before, n / self.rate
+                        live_streak = live_streak + 1 if 0.6 * blk <= took <= 3 * blk else 0
+                        lag = int((now - started - paused_acc) * self.rate) - written
+                        if live_streak >= 3 and lag > self.rate // 2:
+                            w.writeframes(b"\x00\x00" * lag)
+                            written += lag
+                            self.gap_sec += lag / self.rate
+                            self.gaps += 1
+                            live_streak = 0
         except Exception as e:  # surfaced by Session.start()/status()
             self.error = e
             self.ready.set()
@@ -273,6 +300,7 @@ class Session:
         tracks = {
             t.label: {"file": t.path.name, "offset_sec": round(t.offset, 3), "sample_rate": t.rate,
                       "device": t.device_name, "silent": t.max_peak < 1e-4,
+                      "gap_sec": round(t.gap_sec, 2), "gaps": t.gaps,
                       "error": str(t.error) if t.error else None}
             for t in self._tracks()
         }

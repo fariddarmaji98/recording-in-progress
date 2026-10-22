@@ -43,12 +43,14 @@ Linux: butuh `libpulse` (PulseAudio atau `pipewire-pulse`). macOS: izinkan **Mic
 
 | Keadaan | Isi panel |
 |---|---|
-| Awal | satu baris: ikon folder + jalur penyimpanan (klik untuk ganti) · **▶ mulai** · **daftar rekaman / player** · **✕ tutup**. Garis di bawahnya = level suara langsung. |
+| Awal | dua section, atas-bawah. **Atas:** ikon folder + jalur penyimpanan **lengkap** (klik ikon atau teksnya untuk ganti folder). **Bawah:** **▶ mulai** · **daftar rekaman / player** · **⚙ pengaturan** · **✕ tutup**. |
 | Klik ▶ | pilihan **Layar penuh** atau **Aplikasi** (daftar jendela yang terbuka; Zoom, Meet, Teams, dan sejenisnya diurutkan paling atas). Klik dua kali atau pilih lalu **Mulai rekam aplikasi ini**. |
 | Merekam | menit berjalan · **Gambar** · **Jeda** · **Stop**. Tombol Tutup hilang, dan jendela menolak ditutup. |
 | Mode gambar | + pensil / teks · 6 warna · ketebalan · urungkan · **simpan** · **hapus** |
 
-- **Level suara:** garis bergelombang di bawah baris tombol: **hijau = mikrofon, biru = suara sistem**. Kalau garis biru datar saat ada suara diputar, audio sistem tidak masuk.
+- **Tombol:** semua tombol ikon adalah satu komponen (`IconButton`): persegi, ukuran sama persis (satu konstanta `IconButton.SIZE`), warna lewat `tone` (hijau/merah/biasa).
+- **Pengaturan (⚙):** rekam layar on/off, frame per detik video (4/8/15), kualitas audio (16/24/48 kHz). Disimpan, berlaku di rekaman berikutnya.
+- **Level suara:** garis bergelombang di bawah tombol saat merekam: **hijau = mikrofon, biru = suara sistem**. Kalau garis biru datar saat ada suara diputar, audio sistem tidak masuk. Garis ini hanya muncul saat merekam.
 - **Rekam aplikasi:** video dipotong ke persegi panjang jendela itu dan mengikutinya kalau dipindah (ukuran video tetap sama seperti saat mulai; kalau jendela diubah ukurannya, gambar ikut diskalakan). Jendela harus tetap terlihat di depan: yang menutupinya ikut terekam. **Audio tetap seluruh suara sistem + mic**, bukan audio per aplikasi.
   macOS: daftar jendela lewat Quartz (judul jendela butuh izin Screen Recording). Windows: Win32 (ctypes). Linux: X11 lewat `python-xlib`; di Wayland daftar jendela tidak tersedia, pakai Layar penuh.
 - **Gambar:** layar dibekukan dengan screenshot lalu kamu coret di atasnya. Simpan → `drawings/drawing_<jam>.png` di folder rekaman;
