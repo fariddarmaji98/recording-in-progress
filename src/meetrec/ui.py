@@ -28,93 +28,14 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFil
 
 from .meetbridge import DEFAULT_PORT, MeetBridge
 from .paths import DEFAULT_OUT
+from .widgets import BUTTON_STYLE, FG, IconButton, make_icon
 from .screen import ScreenRecorder, screen_permission
 from .windows import WindowInfo, list_windows
 from .winutil import exclude_from_capture
 
 COLORS = ["#ff3b30", "#ffcc00", "#34c759", "#0a84ff", "#ffffff", "#111111"]
-FG = "#e8ebf2"
 _W = Qt.WindowType
 _A = Qt.WidgetAttribute
-
-
-# --- icons (drawn, so they stay readable on the dark card on every OS) ---------------------------
-def make_icon(name: str, color: str = FG) -> QIcon:
-    pm = QPixmap(48, 48)
-    pm.fill(Qt.GlobalColor.transparent)
-    p = QPainter(pm)
-    p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    c = QColor(color)
-    p.setPen(QPen(c, 4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-    p.setBrush(Qt.BrushStyle.NoBrush)
-    P = QPointF
-    if name == "play":
-        p.setBrush(c)
-        p.drawPolygon(QPolygonF([P(15, 9), P(39, 24), P(15, 39)]))
-    elif name == "pause":
-        p.setBrush(c)
-        p.drawRoundedRect(QRectF(13, 10, 8, 28), 2, 2)
-        p.drawRoundedRect(QRectF(27, 10, 8, 28), 2, 2)
-    elif name == "stop":
-        p.setBrush(c)
-        p.drawRoundedRect(QRectF(11, 11, 26, 26), 4, 4)
-    elif name == "close":
-        p.drawLine(12, 12, 36, 36)
-        p.drawLine(36, 12, 12, 36)
-    elif name == "folder":
-        path = QPainterPath(P(6, 14))
-        for pt in (P(19, 14), P(24, 19), P(42, 19), P(42, 38), P(6, 38)):
-            path.lineTo(pt)
-        path.closeSubpath()
-        p.drawPath(path)
-    elif name == "pencil":
-        p.setPen(QPen(c, 8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-        p.drawLine(18, 30, 35, 13)
-        p.setPen(QPen(c, 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-        p.setBrush(c)
-        p.drawPolygon(QPolygonF([P(9, 39), P(12, 28), P(20, 36)]))
-    elif name == "film":
-        p.drawRoundedRect(QRectF(8, 12, 32, 24), 3, 3)
-        p.drawLine(18, 12, 18, 36)
-        p.drawLine(30, 12, 30, 36)
-    elif name == "list":
-        p.drawRoundedRect(QRectF(8, 9, 32, 30), 4, 4)
-        for y in (19, 26, 33):
-            p.drawLine(15, y, 33 if y != 33 else 27, y)
-    elif name == "screen":
-        p.drawRoundedRect(QRectF(7, 10, 34, 22), 3, 3)
-        p.drawLine(24, 32, 24, 38)
-        p.drawLine(15, 38, 33, 38)
-    elif name == "window":
-        p.drawRoundedRect(QRectF(7, 14, 26, 22), 3, 3)
-        p.drawLine(7, 21, 33, 21)
-        p.drawRoundedRect(QRectF(17, 8, 24, 18), 3, 3)
-    elif name == "gear":
-        import math
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        for k in range(8):  # teeth
-            a = k * math.pi / 4
-            p.drawLine(int(24 + 11 * math.cos(a)), int(24 + 11 * math.sin(a)), int(24 + 17 * math.cos(a)), int(24 + 17 * math.sin(a)))
-        p.drawEllipse(QPointF(24, 24), 11, 11)
-        p.drawEllipse(QPointF(24, 24), 4.5, 4.5)
-    elif name == "text":
-        p.drawLine(12, 12, 36, 12)
-        p.drawLine(24, 12, 24, 38)
-    elif name == "save":
-        p.drawLine(24, 8, 24, 28)
-        p.drawPolyline([P(15, 20), P(24, 29), P(33, 20)])
-        p.drawPolyline([P(10, 32), P(10, 40), P(38, 40), P(38, 32)])
-    elif name == "trash":
-        p.drawLine(10, 14, 38, 14)
-        p.drawPolyline([P(19, 14), P(19, 9), P(29, 9), P(29, 14)])
-        p.drawPolyline([P(13, 14), P(15, 40), P(33, 40), P(35, 14)])
-    elif name == "undo":
-        path = QPainterPath(P(36, 38))
-        path.cubicTo(P(38, 22), P(24, 16), P(14, 20))
-        p.drawPath(path)
-        p.drawPolyline([P(14, 9), P(13, 20), P(24, 22)])
-    p.end()
-    return QIcon(pm)
 
 
 def _screen_capture_allowed() -> bool:
@@ -284,24 +205,6 @@ class DrawOverlay(QWidget):
     def finish_text(self) -> None:
         if self._edit:
             self._commit_text()
-
-
-class IconButton(QPushButton):
-    """THE icon-only button of the panel: always an exact SIZE x SIZE square, icon centred.
-    tone: "default" | "primary" (green) | "danger" (red). Every icon button in the UI is one of these."""
-
-    SIZE = 36
-    ICON = 20
-
-    def __init__(self, icon: str, tip: str = "", tone: str = "default", checkable: bool = False):
-        super().__init__()
-        self.setIcon(make_icon(icon))
-        self.setIconSize(QSize(self.ICON, self.ICON))
-        self.setFixedSize(self.SIZE, self.SIZE)
-        self.setToolTip(tip)
-        self.setCheckable(checkable)
-        self.setProperty("square", True)
-        self.setProperty("tone", tone)
 
 
 class PathLabel(QLabel):
@@ -491,12 +394,6 @@ QPushButton {{ background: #2a3040; color: {FG}; border: none; border-radius: 8p
 QPushButton:hover {{ background: #384058; }}
 QPushButton:disabled {{ background: #232836; color: #5d667c; }}
 QPushButton:checked {{ background: #4a6cf7; }}
-QPushButton[square="true"] {{ padding: 0; }}
-QPushButton[tone="primary"] {{ background: #2ea043; }}
-QPushButton[tone="primary"]:hover {{ background: #3bb653; }}
-QPushButton[tone="primary"]:disabled {{ background: #1f5a2c; }}
-QPushButton[tone="danger"] {{ background: #d03b3b; }}
-QPushButton[tone="danger"]:hover {{ background: #e24c4c; }}
 #section {{ border: 1px solid #2c3242; border-radius: 10px; background: transparent; }}
 QCheckBox {{ color: {FG}; }}
 QComboBox {{ background: #2a3040; border: none; border-radius: 8px; padding: 5px 10px; color: {FG}; }}
@@ -515,7 +412,7 @@ class Panel(QWidget):
         super().__init__(None, _W.Tool | _W.FramelessWindowHint | _W.WindowStaysOnTopHint)
         self.setAttribute(_A.WA_TranslucentBackground)
         self.setAttribute(_A.WA_MacAlwaysShowToolWindow, True)
-        self.setStyleSheet(STYLE)
+        self.setStyleSheet(STYLE + BUTTON_STYLE)
         self.settings = QSettings("meetrec", "meetrec")
         self.out_dir = Path(self.settings.value("out_dir", str(DEFAULT_OUT)))
         self.state = "idle"  # idle | starting | recording | paused
@@ -1066,13 +963,13 @@ class Panel(QWidget):
             self.set_status("Pengaturan disimpan; berlaku di rekaman berikutnya.")
 
     def open_player(self) -> None:
-        from .player import PlayerWindow
+        from .player import RecordingsWindow
 
         if self._player is not None and self._player.isVisible():
             self._player.raise_()
             self._player.activateWindow()
             return
-        self._player = PlayerWindow(self.out_dir)
+        self._player = RecordingsWindow(self.out_dir)
         self._player.closed.connect(self._player_closed)
         # The player is a sub page. This panel is always on top, so it would cover the player:
         # hide it while the player is open and bring it back when the player closes.
