@@ -177,6 +177,7 @@ class Session:
         self.mic_name, self.speaker_name = mic_name, speaker_name
         self.started_at = datetime.now()
         self.t0 = 0.0
+        self.t0_wall = 0.0
         self.extra_meta: dict = {}  # e.g. the UI adds the video track here before stop()
         self.live_from: float | None = None  # monotonic time when every device was ready
         self._mic: _WavThread | None = None
@@ -204,6 +205,7 @@ class Session:
     def start(self) -> None:
         self.dir.mkdir(parents=True, exist_ok=True)
         self.t0 = self.t0 or time.monotonic()  # the panel presets t0 so video and audio start together
+        self.t0_wall = time.time() - (time.monotonic() - self.t0)  # same instant on the wall clock (Meet extension events)
         threads: list[_WavThread] = []
         if self.want_mic:
             self._mic = _WavThread("mic", self._open_mic, self.dir / "mic.wav", self.rate, self.t0)
@@ -305,6 +307,7 @@ class Session:
             for t in self._tracks()
         }
         meta = {"started_at": self.started_at.isoformat(timespec="seconds"), "platform": sys.platform,
+                "t0_wall": round(self.t0_wall, 3),
                 "ready_sec": round((self.live_from or self.t0) - self.t0, 3),
                 "duration_sec": round(self.active_seconds(), 3), "pauses": self._pauses, "tracks": tracks,
                 **self.extra_meta}

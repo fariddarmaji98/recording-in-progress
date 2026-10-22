@@ -25,6 +25,33 @@ lewat diarization. Di zona overlap antar peserta remote, potongan masing-masing 
 (klip `_overlaps/` menandai zonanya). Pemisahan suara sungguhan (speech separation) belum ada.
 Pakai headphone supaya suara lawan bicara tidak ikut masuk `mic.wav`.
 
+## Ekstensi Chrome untuk Google Meet (pembeda lebih akurat)
+
+Folder `extension/`. Ekstensi membaca halaman Meet-mu (tanpa API Meet), mencatat **siapa bicara dari menit berapa sampai berapa**,
+dan mengirimnya ke aplikasi meetrec di komputer yang sama. Aplikasi memakainya untuk:
+
+1. **Menamai suara**: "Remote 1" menjadi "Budi" (lewat tumpang tindih waktu, dengan koreksi jeda indikator Meet).
+2. **Menentukan jumlah pembicara** diarization (jumlah nama yang benar-benar bicara), kecuali kamu set `--speakers` sendiri.
+3. **Menamai zona overlap**: "Budi + Sari", bukan "Remote 1|Remote 2".
+
+**Pasang:** Chrome → `chrome://extensions` → nyalakan *Developer mode* → *Load unpacked* → pilih folder `extension/`.
+Lalu di aplikasi klik ⚙ Pengaturan → **Kode ekstensi Chrome** → *Salin*, dan tempel di *Opsi* ekstensi → *Tes koneksi*.
+
+**Dua sinyal deteksi**, keduanya tidak memakai nama class Meet yang diacak:
+- **Tile peserta**: tile (`[data-participant-id]`) yang atributnya terus berubah = sedang bicara (animasi indikator). Efek hover diabaikan.
+- **Caption (CC)**: nama dan teks yang berubah di panel caption = sedang bicara. Menjangkau peserta yang tilenya tidak tampil, tapi caption harus menyala
+  (tombol *Aktifkan caption* di popup, atau otomatis lewat Opsi).
+
+**Popup ekstensi** menampilkan status koneksi, siapa yang terdeteksi bicara sekarang, total detik per orang, dan apakah caption terbaca,
+untuk memeriksa langsung di rapat apakah deteksinya jalan.
+
+**Keamanan:** penerima hanya mendengarkan `127.0.0.1` (bukan jaringan), setiap permintaan butuh kode, dan tidak ada header CORS, jadi halaman web tidak bisa memanggilnya.
+Ekstensi tidak mengirim apa pun ke internet. Data hanya disimpan saat kamu merekam: `meet_events.json` di folder rekaman.
+
+**Status:** logika deteksi dan penerima sudah dites (14 tes JS di DOM tiruan, 33 tes Python). **Belum diuji di rapat Meet sungguhan**: struktur halaman Meet
+bukan API publik dan bisa berubah, jadi cek popup di rapat pertamamu; kalau tidak ada yang terdeteksi, nyalakan caption atau ubah *Kepekaan* di Opsi.
+Tes JS: `cd extension && npm install && npm test`.
+
 ## Pasang
 
 ```bash

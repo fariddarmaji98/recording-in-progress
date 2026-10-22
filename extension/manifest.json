@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "meetrec: penanda pembicara Google Meet",
+  "short_name": "meetrec Meet",
+  "version": "0.1.0",
+  "description": "Mencatat siapa bicara kapan di Google Meet (nama + menit mulai/selesai) dan mengirimnya ke aplikasi meetrec di komputermu, supaya pemisahan pembicara lebih akurat. Tidak memakai API Meet, tidak mengirim apa pun ke internet.",
+  "minimum_chrome_version": "110",
+  "permissions": ["storage"],
+  "host_permissions": ["https://meet.google.com/*", "http://127.0.0.1/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://meet.google.com/*"],
+      "js": ["detector.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": { "default_popup": "popup.html", "default_title": "meetrec: penanda pembicara" },
+  "options_page": "options.html",
+  "icons": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" }
+}

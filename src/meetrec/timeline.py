@@ -7,6 +7,7 @@ Times in speakers.json are on the shared recording timeline (track offsets from 
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -39,8 +40,82 @@ def find_overlaps(segs: list[dict]) -> list[dict]:
     return out
 
 
+MEET_MIN_OVERLAP = 2.0   # seconds a voice cluster must overlap a name before it is called by that name
+MEET_MIN_RATIO = 0.35    # ... and that overlap must cover this share of the cluster's speech
+MEET_MIN_SPOKEN = 3.0    # a name that spoke less than this in total is noise, not a participant
+MEET_LAGS = (-0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0, 1.5)  # Meet's speaking indicator can trail the audio
+
+
+def load_meet(folder: Path) -> list[dict]:
+    """Other participants' speaking intervals from the Chrome extension (self excluded), or []."""
+    f = folder / "meet_events.json"
+    if not f.exists():
+        return []
+    try:
+        ivs = json.loads(f.read_text()).get("intervals", [])
+    except (ValueError, OSError):
+        return []
+    return [i for i in ivs if not i.get("self")]
+
+
+def meet_names(intervals: list[dict]) -> list[str]:
+    """Participants who really spoke (enough total time), most talkative first."""
+    tot: dict[str, float] = {}
+    for i in intervals:
+        tot[i["name"]] = tot.get(i["name"], 0.0) + (i["end"] - i["start"])
+    return [n for n, v in sorted(tot.items(), key=lambda kv: -kv[1]) if v >= MEET_MIN_SPOKEN]
+
+
+def _ov(a0: float, a1: float, b0: float, b1: float) -> float:
+    return max(0.0, min(a1, b1) - max(a0, b0))
+
+
+def name_clusters(remote: list[dict], intervals: list[dict]) -> tuple[dict[str, str], float, dict]:
+    """Which real name belongs to which diarization cluster ("Remote 1")?
+
+    Voting by overlap between each cluster's speech and each person's speaking intervals, at the best global
+    time shift (the indicator lags). One name per cluster and one cluster per name; weak matches stay unnamed."""
+    names = set(meet_names(intervals))
+    ivs = [i for i in intervals if i["name"] in names]
+    clusters = sorted({s["speaker"] for s in remote})
+    dur = {c: sum(s["end"] - s["start"] for s in remote if s["speaker"] == c) for c in clusters}
+    if not ivs or not clusters:
+        return {}, 0.0, {}
+
+    def matrix(lag: float) -> dict[tuple[str, str], float]:
+        m: dict[tuple[str, str], float] = {}
+        for c in clusters:
+            for i in ivs:
+                o = sum(_ov(s["start"], s["end"], i["start"] - lag, i["end"] - lag) for s in remote if s["speaker"] == c)
+                if o > 0:
+                    m[(c, i["name"])] = m.get((c, i["name"]), 0.0) + o
+        return m
+
+    def assign(m):
+        used_c, used_n, out = set(), set(), {}
+        for (c, n), o in sorted(m.items(), key=lambda kv: -kv[1]):
+            if c in used_c or n in used_n:
+                continue
+            if o >= MEET_MIN_OVERLAP and o >= MEET_MIN_RATIO * dur[c]:
+                out[c] = n
+                used_c.add(c)
+                used_n.add(n)
+        return out
+
+    best = max(((sum(m[(c, n)] for c, n in assign(m).items()), lag, m) for lag in MEET_LAGS for m in [matrix(lag)]),
+               key=lambda x: (x[0], -abs(x[1])))
+    _, lag, m = best
+    mapping = assign(m)
+    return mapping, lag, {f"{c} -> {n}": round(o, 1) for (c, n), o in m.items() if mapping.get(c) == n}
+
+
 def build_timeline(folder: Path, remote_speakers: int = -1, threshold: float = 0.3) -> Path:
     off = _offsets(folder)
+    meet = load_meet(folder)
+    hint = None
+    if meet and remote_speakers == -1 and len(meet_names(meet)) >= 2:
+        hint = len(meet_names(meet))  # Meet saw this many different people speak: the cluster count is known
+        remote_speakers = hint
     segs: list[dict] = []
     mic, system = folder / "mic.wav", folder / "system.wav"
     if mic.exists():
@@ -54,12 +129,28 @@ def build_timeline(folder: Path, remote_speakers: int = -1, threshold: float = 0
     segs.sort(key=lambda s: (s["start"], s["end"]))
     for s in segs:
         s["start"], s["end"] = round(s["start"], 2), round(s["end"], 2)
+    meet_info = None
+    if meet:
+        remote = [s for s in segs if s["track"] == "system"]
+        mapping, lag, scores = name_clusters(remote, meet)
+        for s in remote:
+            s["cluster"] = s["speaker"]
+            s["speaker"] = mapping.get(s["speaker"], s["speaker"])
+        meet_info = {"names": meet_names(meet), "mapping": mapping, "lag_sec": lag, "overlap_sec": scores,
+                     "speaker_count_hint": hint}
     overlaps = find_overlaps(segs)
     for o in overlaps:
         o["start"], o["end"] = round(o["start"], 2), round(o["end"], 2)
     out = folder / "speakers.json"
-    out.write_text(json.dumps({"segments": segs, "overlaps": overlaps}, ensure_ascii=False, indent=1))
+    doc = {"segments": segs, "overlaps": overlaps}
+    if meet_info is not None:
+        doc["meet"] = meet_info
+    out.write_text(json.dumps(doc, ensure_ascii=False, indent=1))
     return out
+
+
+def _safe(name: str) -> str:
+    return re.sub(r"[^\w.+-]+", "_", name).strip("_") or "speaker"
 
 
 def _stamp(sec: float) -> str:
@@ -90,7 +181,7 @@ def split_sections(folder: Path) -> Path:
 
     for i, s in enumerate(data["segments"], 1):
         hit = any(o["start"] < s["end"] and o["end"] > s["start"] and s["speaker"] in o["speakers"] for o in overlaps)
-        d = out / s["speaker"].replace(" ", "_")
+        d = out / _safe(s["speaker"])
         d.mkdir(exist_ok=True)
         name = f"{i:03d}_{_stamp(s['start'])}-{_stamp(s['end'])}{'_OVERLAP' if hit else ''}.wav"
         sf.write(str(d / name), _slice(audio[s["track"]], off.get(s["track"], 0.0), s["start"], s["end"]), RATE)
@@ -101,7 +192,7 @@ def split_sections(folder: Path) -> Path:
         d.mkdir(exist_ok=True)
         for j, o in enumerate(overlaps, 1):
             mix = sum(_slice(a, off.get(t, 0.0), o["start"], o["end"]) for t, a in audio.items())
-            name = f"{j:03d}_{_stamp(o['start'])}-{_stamp(o['end'])}_{'+'.join(x.replace(' ', '') for x in o['speakers'])}.wav"
+            name = f"{j:03d}_{_stamp(o['start'])}-{_stamp(o['end'])}_{'+'.join(_safe(x) for x in o['speakers'])}.wav"
             sf.write(str(d / name), np.clip(mix, -1.0, 1.0), RATE)
             index.append({"file": f"_overlaps/{name}", "speaker": " + ".join(o["speakers"]),
                           "start": o["start"], "end": o["end"], "has_overlap": True})

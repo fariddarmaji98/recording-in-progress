@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="id"><head><meta charset="utf-8"><title>meetrec: opsi</title>
+<style>
+  :root { --bg:#14171e; --card:#1c2029; --fg:#e8ebf2; --muted:#8f98ad; --line:#2c3242; }
+  @media (prefers-color-scheme: light) { :root { --bg:#f4f6fa; --card:#fff; --fg:#1b2030; --muted:#5d667c; --line:#d5dbe6; } }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 -apple-system, system-ui, sans-serif; }
+  main { max-width:560px; margin:0 auto; padding:24px 16px; display:grid; gap:14px; }
+  h1 { font-size:18px; margin:0; } .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; display:grid; gap:10px; }
+  label { display:grid; gap:4px; } .muted { color:var(--muted); font-size:12px; }
+  input, select { background:#2a3040; color:#e8ebf2; border:0; border-radius:8px; padding:8px 10px; font:inherit; }
+  button { background:#4a6cf7; color:#fff; border:0; border-radius:8px; padding:8px 14px; cursor:pointer; font:inherit; justify-self:start; }
+  #msg { min-height:1.4em; }
+</style></head><body><main>
+  <h1>meetrec: opsi ekstensi</h1>
+  <div class="card">
+    <label>Kode (token) dari aplikasi meetrec
+      <input id="token" autocomplete="off" spellcheck="false" placeholder="tempel di sini">
+      <span class="muted">Di aplikasi: tombol ⚙ Pengaturan → "Kode ekstensi Chrome" → Salin.</span></label>
+    <label>Port aplikasi <input id="port" type="number" min="1024" max="65535"></label>
+  </div>
+  <div class="card">
+    <label>Kepekaan deteksi tile
+      <select id="sens"><option value="low">Rendah (sedikit salah deteksi)</option><option value="normal">Normal</option><option value="high">Tinggi (menangkap suara pelan)</option></select></label>
+    <label style="display:flex;gap:8px;align-items:center"><input id="auto" type="checkbox"> Nyalakan caption otomatis di Meet (sinyal tambahan)</label>
+  </div>
+  <div style="display:flex;gap:10px;align-items:center"><button id="save">Simpan</button><button id="test" style="background:#2a3040">Tes koneksi</button><span id="msg"></span></div>
+</main><script src="options.js"></script></body></html>

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="id"><head><meta charset="utf-8"><title>meetrec</title>
+<style>
+  :root { --bg:#14171e; --card:#1c2029; --fg:#e8ebf2; --muted:#8f98ad; --ok:#34c759; --bad:#ff6b6b; --line:#2c3242; }
+  @media (prefers-color-scheme: light) { :root { --bg:#f4f6fa; --card:#fff; --fg:#1b2030; --muted:#5d667c; --line:#d5dbe6; } }
+  body { margin:0; width:340px; background:var(--bg); color:var(--fg); font:13px/1.45 -apple-system, system-ui, sans-serif; }
+  main { padding:12px; display:grid; gap:10px; }
+  h1 { font-size:14px; margin:0; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px; }
+  .row { display:flex; justify-content:space-between; gap:8px; } .muted { color:var(--muted); }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; background:var(--bad); }
+  .dot.on { background:var(--ok); }
+  ul { margin:6px 0 0; padding:0; list-style:none; } li { display:flex; justify-content:space-between; padding:2px 0; }
+  .speaking { color:var(--ok); font-weight:600; }
+  button { background:#2a3040; color:#e8ebf2; border:0; border-radius:8px; padding:7px 10px; cursor:pointer; }
+  button:hover { background:#384058; } #err { color:var(--bad); }
+</style></head><body><main>
+  <h1>meetrec: penanda pembicara Meet</h1>
+  <div class="card">
+    <div class="row"><span><span id="appdot" class="dot"></span><span id="app">Aplikasi: memeriksa…</span></span></div>
+    <div class="muted" id="rec"></div><div id="err"></div>
+  </div>
+  <div class="card">
+    <div class="row"><b>Terdeteksi di halaman ini</b><span class="muted" id="tiles"></span></div>
+    <div id="now" class="muted">Belum ada yang bicara</div>
+    <ul id="totals"></ul>
+    <div class="muted" id="caps"></div>
+  </div>
+  <div class="row"><button id="cc">Aktifkan caption</button><button id="opt">Opsi</button></div>
+</main><script src="popup.js"></script></body></html>

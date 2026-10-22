@@ -8,6 +8,8 @@ drawing   : + pencil/text · colors · thickness · undo · save · discard
 """
 from __future__ import annotations
 
+import json
+import secrets
 import signal
 import sys
 import threading
@@ -24,6 +26,7 @@ from PySide6.QtGui import (QColor, QDesktopServices, QFont, QGuiApplication, QIc
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QFrame, QHBoxLayout,
                                QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QSlider, QVBoxLayout, QWidget)
 
+from .meetbridge import DEFAULT_PORT, MeetBridge
 from .paths import DEFAULT_OUT
 from .screen import ScreenRecorder, screen_permission
 from .windows import WindowInfo, list_windows
@@ -372,7 +375,7 @@ VIDEO_FPS = [4, 8, 15, 30]
 class SettingsDialog(QDialog):
     """Recording options. They are stored in QSettings and read when a recording starts."""
 
-    def __init__(self, settings: QSettings, parent=None):
+    def __init__(self, settings: QSettings, parent=None, token: str = "", port: int = DEFAULT_PORT):
         super().__init__(parent)
         self.setWindowTitle("Pengaturan")
         self.setModal(True)
@@ -391,6 +394,20 @@ class SettingsDialog(QDialog):
         form.addRow(self.video)
         form.addRow("FPS video", self.fps)
         form.addRow("Kualitas audio", self.rate)
+        self.bridge = QCheckBox("Terima data dari ekstensi Chrome (siapa bicara di Meet)")
+        self.bridge.setChecked(settings.value("bridge_enabled", True, type=bool))
+        form.addRow(self.bridge)
+        self.token = QLineEdit(token)
+        self.token.setReadOnly(True)
+        copy = QPushButton("Salin")
+        copy.clicked.connect(lambda: QApplication.clipboard().setText(self.token.text()))
+        row = QHBoxLayout()
+        row.addWidget(self.token, 1)
+        row.addWidget(copy)
+        form.addRow("Kode ekstensi Chrome", row)
+        hint = QLabel(f"Tempel kode ini di Opsi ekstensi. Aplikasi mendengarkan di 127.0.0.1:{port} (hanya komputer ini).", objectName="status")
+        hint.setWordWrap(True)
+        form.addRow(hint)
         buttons = QHBoxLayout()
         buttons.addStretch(1)
         cancel = QPushButton("Batal")
@@ -410,6 +427,7 @@ class SettingsDialog(QDialog):
         settings.setValue("record_video", self.video.isChecked())
         settings.setValue("video_fps", self.fps.currentData())
         settings.setValue("audio_rate", self.rate.currentData())
+        settings.setValue("bridge_enabled", self.bridge.isChecked())
 
 
 class _Starter(QThread):
@@ -508,6 +526,11 @@ class Panel(QWidget):
         self._placed = False
         self._top_left = self.pos()
         self._shown_errors: list[str] = []
+        token = self.settings.value("bridge_token", "", type=str)
+        if not token:
+            token = secrets.token_urlsafe(12)
+            self.settings.setValue("bridge_token", token)
+        self.bridge = MeetBridge(token, self.settings.value("bridge_port", DEFAULT_PORT, type=int))
         self.video: ScreenRecorder | None = None
         self._ov_timer: QTimer | None = None
         self._ov_version = -1
@@ -669,6 +692,11 @@ class Panel(QWidget):
         self.level = LevelLine()
         v.addWidget(self.level)
 
+        self.meet_lbl = QLabel("", objectName="status")
+        self.meet_lbl.setWordWrap(True)
+        self.meet_lbl.hide()
+        v.addWidget(self.meet_lbl)
+
         self.status = QLabel("", objectName="status")
         self.status.setWordWrap(True)
         self.status.setTextFormat(Qt.TextFormat.RichText)
@@ -688,6 +716,8 @@ class Panel(QWidget):
         self.level_timer.timeout.connect(self._push_levels)
         self.setFixedWidth(370)
         self.refresh()
+        if self.settings.value("bridge_enabled", True, type=bool):
+            self.bridge.start()
 
     # --- helpers ---------------------------------------------------------------------------------
     def _btn(self, icon: str, text: str = "", tip: str = "", checkable: bool = False, name: str = "") -> QPushButton:
@@ -759,6 +789,9 @@ class Panel(QWidget):
             self.set_status('Masalah rekam: ' + '; '.join(errs), error=True)
         mm, ss = divmod(int(self.session.active_seconds()), 60)
         self.timer_lbl.setText(("⏸ " if self.state == "paused" else "● ") + f"{mm:02d}:{ss:02d}")
+        names = self.bridge.names() if self.bridge.recording else []
+        self.meet_lbl.setText("Ekstensi Meet terhubung: " + ", ".join(names) if names else "")
+        self.meet_lbl.setVisible(bool(names))
 
     # --- actions ---------------------------------------------------------------------------------
     def choose_folder(self) -> None:
@@ -850,6 +883,7 @@ class Panel(QWidget):
         self.tick.start()
         self.level.reset()
         self.level_timer.start()
+        self.bridge.begin(self.session.t0_wall)
         self.refresh()
 
     def toggle_pause(self) -> None:
@@ -877,7 +911,13 @@ class Panel(QWidget):
             self.tick.stop()
             self.level_timer.stop()
             self.level.reset()
+            self.meet_lbl.hide()
+            meet = self.bridge.end() if self.bridge.recording else None
             try:
+                if meet and meet["events"]:
+                    (self.session.dir / "meet_events.json").write_text(json.dumps(meet, ensure_ascii=False, indent=1))
+                    self.session.extra_meta["meet"] = {"meeting": meet["meeting"], "events": len(meet["events"]),
+                                                       "names": sorted({i["name"] for i in meet["intervals"] if not i["self"]})}
                 if self.video:
                     self.video.stop()
                     self.session.extra_meta["video"] = self.video.info()
@@ -885,7 +925,6 @@ class Panel(QWidget):
                         warn += f"<br><span style='color:#ffb86b'>Video bermasalah: {self.video.error}</span>"
                     self.video = None
                 folder = self.session.stop()
-                import json
                 meta = json.loads((folder / "meta.json").read_text())
                 silent = [n for n, t in meta["tracks"].items() if t["silent"]]
                 if silent:
@@ -1016,9 +1055,13 @@ class Panel(QWidget):
     def open_settings(self) -> None:
         if self.state != "idle":
             return
-        dlg = SettingsDialog(self.settings, self)
+        dlg = SettingsDialog(self.settings, self, token=self.bridge.token, port=self.bridge.port)
         if dlg.exec():
             dlg.store(self.settings)
+            if self.settings.value("bridge_enabled", True, type=bool):
+                self.bridge.start()
+            else:
+                self.bridge.stop()
             self.set_status("Pengaturan disimpan; berlaku di rekaman berikutnya.")
 
     def open_player(self) -> None:
@@ -1043,6 +1086,7 @@ class Panel(QWidget):
             self._close_overlay()
         if self.state != "idle":
             self.stop()
+        self.bridge.stop()
 
     # --- window ----------------------------------------------------------------------------------
     def mousePressEvent(self, e):

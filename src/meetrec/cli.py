@@ -48,6 +48,10 @@ def cmd_timeline(a: argparse.Namespace) -> None:
     who = sorted({s["speaker"] for s in data["segments"]})
     ov = sum(o["end"] - o["start"] for o in data["overlaps"])
     print(f"{out}\n  pembicara: {', '.join(who)}\n  segmen: {len(data['segments'])}, overlap: {len(data['overlaps'])} kali ({ov:.1f} detik)")
+    if "meet" in data:
+        m = data["meet"]
+        print(f"  dari ekstensi Meet: nama {', '.join(m['names']) or '-'}; dipetakan: {m['mapping'] or 'tidak ada yang cukup yakin'}"
+              f"{'; jumlah pembicara diset ' + str(m['speaker_count_hint']) if m['speaker_count_hint'] else ''}")
 
 
 def cmd_split(a: argparse.Namespace) -> None:

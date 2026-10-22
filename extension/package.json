@@ -1,0 +1,8 @@
+{
+  "name": "meetrec-meet-extension",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Chrome extension: who speaks when in Google Meet, sent to the meetrec app",
+  "scripts": { "test": "node --test test/" },
+  "devDependencies": { "jsdom": "^26.0.0" }
+}
