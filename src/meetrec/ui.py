@@ -11,14 +11,19 @@ from __future__ import annotations
 import signal
 import sys
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 from PySide6.QtCore import QPointF, QRectF, QSettings, QSize, Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import (QColor, QDesktopServices, QFont, QGuiApplication, QIcon, QImage, QPainter,
                            QPainterPath, QPen, QPixmap, QPolygonF)
 from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QSlider, QVBoxLayout, QWidget)
+
+from .screen import ScreenRecorder, screen_permission
+from .winutil import exclude_from_capture
 
 DEFAULT_OUT = Path.home() / "Recordings" / "meetrec"
 COLORS = ["#ff3b30", "#ffcc00", "#34c759", "#0a84ff", "#ffffff", "#111111"]
@@ -119,6 +124,7 @@ class DrawOverlay(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.items: list[dict] = []
         self.tool, self.color, self.width_px = "pencil", QColor(COLORS[0]), 4
+        self.version = 0  # bumped on every change, so the panel knows when to re-render the video frame
         self._cur: dict | None = None
         self._edit: _TextEdit | None = None
         self._edit_pos = QPointF()
@@ -155,8 +161,9 @@ class DrawOverlay(QWidget):
             p.fillRect(self.rect(), QColor(0, 0, 0, 2))  # near-invisible but still catches the mouse
         self._paint_items(p)
 
-    def render_image(self) -> QImage:
-        dpr = self.shot.devicePixelRatio() if self.shot is not None else self._screen.devicePixelRatio()
+    def render_image(self, dpr: float | None = None) -> QImage:
+        if dpr is None:
+            dpr = self.shot.devicePixelRatio() if self.shot is not None else self._screen.devicePixelRatio()
         img = QImage(int(self.width() * dpr), int(self.height() * dpr), QImage.Format.Format_ARGB32)
         img.fill(Qt.GlobalColor.transparent)
         p = QPainter(img)
@@ -178,6 +185,7 @@ class DrawOverlay(QWidget):
         if self.tool == "pencil":
             self._cur = {"k": "stroke", "color": QColor(self.color), "w": self.width_px, "pts": [pos]}
             self.items.append(self._cur)
+            self.version += 1
         else:
             self._start_text(pos)
         self.update()
@@ -185,6 +193,7 @@ class DrawOverlay(QWidget):
     def mouseMoveEvent(self, e):
         if self._cur is not None:
             self._cur["pts"].append(e.position())
+            self.version += 1
             self.update()
 
     def mouseReleaseEvent(self, _):
@@ -226,6 +235,7 @@ class DrawOverlay(QWidget):
             size = self._text_size()
             self.items.append({"k": "text", "color": QColor(self.color), "size": size, "text": text,
                                "pos": QPointF(self._edit_pos.x() + 4, self._edit_pos.y() + size)})
+            self.version += 1
         self.update()
 
     def _cancel_text(self) -> None:
@@ -238,6 +248,7 @@ class DrawOverlay(QWidget):
             self._cancel_text()
         elif self.items:
             self.items.pop()
+            self.version += 1
         self.update()
 
     def finish_text(self) -> None:
@@ -253,13 +264,41 @@ class _Starter(QThread):
     def __init__(self, session):
         super().__init__()
         self.session = session
+        self.video: ScreenRecorder | None = None
+        self.video_note = ""
 
     def run(self):
+        t0 = time.monotonic()
+        self.session.t0 = t0  # one clock origin for audio and video
+        # Video is best effort: without it the audio recording still goes on. It starts at the same
+        # time as the audio devices (not after them), so both are ready together.
+        v = None
+        self.session.dir.mkdir(parents=True, exist_ok=True)  # the video thread writes here before audio starts
+        try:
+            if not screen_permission(request=True):
+                self.video_note = ("Izin Screen Recording belum diberikan, jadi layar tidak direkam (audio tetap jalan). "
+                                   "Beri izin lalu buka ulang aplikasi.")
+            else:
+                v = ScreenRecorder(self.session.dir / "video.mp4", t0)
+                v.start()
+        except Exception as e:
+            self.video_note = f"Video gagal: {e}"
+            v = None
         try:
             self.session.start()
-            self.done.emit("")
         except Exception as e:
+            if v:
+                v.stop()
             self.done.emit(str(e))
+            return
+        if v:
+            v.ready.wait(20)
+            if v.error or not v.ready.is_set():
+                self.video_note = f"Video gagal: {v.error or 'encoder tidak siap'}"
+                v.stop()
+            else:
+                self.video = v
+        self.done.emit("")
 
 
 # --- panel ---------------------------------------------------------------------------------------
@@ -296,6 +335,9 @@ class Panel(QWidget):
         self._placed = False
         self._top_left = self.pos()
         self._shown_errors: list[str] = []
+        self.video: ScreenRecorder | None = None
+        self._ov_timer: QTimer | None = None
+        self._ov_version = -1
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(6, 6, 6, 6)
@@ -489,6 +531,7 @@ class Panel(QWidget):
         self._starter.start()
 
     def _started(self, err: str) -> None:
+        self._starter.wait(3000)  # run() has already returned; let the thread finish before it is dropped
         self.start_btn.setEnabled(True)
         self.close_btn.setEnabled(True)
         self.start_btn.setText(" Mulai")
@@ -500,7 +543,9 @@ class Panel(QWidget):
             return
         self.state = "recording"
         self._shown_errors = []
-        self.set_status("")
+        self.video = self._starter.video
+        note = self._starter.video_note
+        self.set_status(f"<span style='color:#ffb86b'>{note}</span>" if note else "")
         self.update_timer()
         self.tick.start()
         self.refresh()
@@ -510,9 +555,13 @@ class Panel(QWidget):
             return
         if self.state == "paused":
             self.session.resume()
+            if self.video:
+                self.video.resume()
             self.state = "recording"
         else:
             self.session.pause()
+            if self.video:
+                self.video.pause()
             self.state = "paused"
         self.update_timer()
         self.refresh()
@@ -525,12 +574,18 @@ class Panel(QWidget):
         if self.session:
             self.tick.stop()
             try:
+                if self.video:
+                    self.video.stop()
+                    self.session.extra_meta["video"] = self.video.info()
+                    if self.video.error:
+                        warn += f"<br><span style='color:#ffb86b'>Video bermasalah: {self.video.error}</span>"
+                    self.video = None
                 folder = self.session.stop()
                 import json
                 meta = json.loads((folder / "meta.json").read_text())
                 silent = [n for n, t in meta["tracks"].items() if t["silent"]]
                 if silent:
-                    warn = f"<br><span style='color:#ffb86b'>Track diam: {', '.join(silent)}. Cek izin mikrofon / audio sistem.</span>"
+                    warn += f"<br><span style='color:#ffb86b'>Track diam: {', '.join(silent)}. Cek izin mikrofon / audio sistem.</span>"
             except Exception as e:
                 self.set_status(f"Gagal menyimpan: {e}", error=True)
         self.session = None
@@ -567,6 +622,14 @@ class Panel(QWidget):
                 self.overlay.color = QColor(col)
         ov = self.overlay
         ov.escape.connect(self.discard_drawing)
+        if shot is not None and self.video:
+            # Frozen screen: encode overlay renders (screenshot + strokes) so the panel is not in the video.
+            self._ov_version = -1
+            self._ov_timer = QTimer(self)
+            self._ov_timer.setInterval(150)
+            self._ov_timer.timeout.connect(self._push_overlay)
+            self._ov_timer.start()
+            QTimer.singleShot(0, self._push_overlay)
         # The panel lives INSIDE the overlay while drawing. As a separate window it got covered the
         # moment the overlay was clicked (the OS raises the clicked window).
         local = self._top_left - screen.geometry().topLeft()
@@ -615,8 +678,22 @@ class Panel(QWidget):
         self._close_overlay()
         self.set_status("Gambar dihapus" if had else "Mode gambar ditutup")
 
+    def _push_overlay(self) -> None:
+        ov = self.overlay
+        if not ov or not self.video or ov.shot is None or ov.version == self._ov_version:
+            return
+        img = ov.render_image(1.0)
+        arr = np.frombuffer(img.constBits(), np.uint8).reshape(img.height(), img.bytesPerLine() // 4, 4)[:, :img.width()].copy()
+        self.video.set_override(arr)
+        self._ov_version = ov.version
+
     def _close_overlay(self) -> None:
         ov, self.overlay = self.overlay, None
+        if self._ov_timer:
+            self._ov_timer.stop()
+            self._ov_timer = None
+        if self.video:
+            self.video.set_override(None)
         if ov:
             gpos = ov.mapToGlobal(self.pos()) if self.parent() is ov else self._top_left
             self.hide()
@@ -630,6 +707,20 @@ class Panel(QWidget):
         self.refresh()
         self.show()
         self.raise_()
+        exclude_from_capture(self)  # the native window was recreated
+
+    def shutdown(self) -> None:
+        """Stop and save whatever is going on, also when quit/kill arrives while the devices are still opening."""
+        st = getattr(self, "_starter", None)
+        if st is not None:
+            st.wait(25000)  # never drop a QThread that is still running
+            if self.state == "starting":  # its done-signal has not been delivered yet: adopt the result
+                self.video = st.video
+                self.state = "recording"
+        if self.overlay:
+            self._close_overlay()
+        if self.state != "idle":
+            self.stop()
 
     # --- window ----------------------------------------------------------------------------------
     def mousePressEvent(self, e):
@@ -664,8 +755,13 @@ def _prewarm() -> None:
     try:
         import warnings
 
+        import av  # noqa: F401
+        import mss  # noqa: F401
         import soundcard as sc
         import soxr  # noqa: F401
+
+        from .screen import pick_encoder
+        pick_encoder()
         if sys.platform == "darwin":
             import catap  # noqa: F401
         with warnings.catch_warnings():
@@ -684,12 +780,15 @@ def run() -> None:
     panel = Panel()
     panel.show()
     panel.place_top_right()
-    app.aboutToQuit.connect(lambda: panel.session and panel.session.stop())
+    exclude_from_capture(panel)
+    def finish_recording():
+        panel.shutdown()
+
+    app.aboutToQuit.connect(finish_recording)
 
     # Ctrl-C / kill: stop and save the recording instead of dying with half-written files.
     def graceful(*_):
-        if panel.state != "idle":
-            panel.stop()
+        panel.shutdown()
         app.quit()
 
     signal.signal(signal.SIGINT, graceful)

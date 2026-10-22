@@ -82,6 +82,12 @@ def cmd_transcribe(a: argparse.Namespace) -> None:
     print(out)
 
 
+def cmd_fullmedia(a: argparse.Namespace) -> None:
+    from .fullmedia import build_full_media
+
+    print(build_full_media(a.folder, a.out))
+
+
 def cmd_ui(_: argparse.Namespace) -> None:
     from .ui import run
 
@@ -97,6 +103,11 @@ def main() -> None:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("ui", help="buka panel mengambang (default kalau tanpa argumen)").set_defaults(fn=cmd_ui)
+    f = sub.add_parser("fullmedia", help="gabungkan video + mic + sistem jadi satu mp4 (file asli tidak dihapus)")
+    f.add_argument("folder", type=Path)
+    f.add_argument("--out", default="full.mp4", help="nama file hasil di dalam folder (default full.mp4)")
+    f.set_defaults(fn=cmd_fullmedia)
+
     sub.add_parser("devices", help="daftar mikrofon dan speaker").set_defaults(fn=cmd_devices)
 
     r = sub.add_parser("record", help="rekam mic + suara sistem (dua file terpisah)")

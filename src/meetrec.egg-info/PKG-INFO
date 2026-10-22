@@ -10,8 +10,10 @@ Requires-Dist: soundfile
 Requires-Dist: soxr
 Requires-Dist: soundcard
 Requires-Dist: PySide6
+Requires-Dist: mss
+Requires-Dist: av<17
+Requires-Dist: imageio-ffmpeg
 Requires-Dist: catap; sys_platform == "darwin"
 Requires-Dist: pyobjc-framework-Quartz; sys_platform == "darwin"
 Provides-Extra: transcribe
 Requires-Dist: faster-whisper; extra == "transcribe"
-Requires-Dist: av<17; extra == "transcribe"

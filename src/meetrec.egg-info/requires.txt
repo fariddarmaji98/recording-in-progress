@@ -5,6 +5,9 @@ soundfile
 soxr
 soundcard
 PySide6
+mss
+av<17
+imageio-ffmpeg
 
 [:sys_platform == "darwin"]
 catap
@@ -12,4 +15,3 @@ pyobjc-framework-Quartz
 
 [transcribe]
 faster-whisper
-av<17
