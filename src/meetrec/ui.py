@@ -486,12 +486,8 @@ class Panel(QWidget):
         pv = QVBoxLayout(self.pick_row)
         pv.setContentsMargins(0, 0, 0, 0)
         pv.setSpacing(8)
-        head = QHBoxLayout()
-        head.addWidget(QLabel("Rekam apa?"), 1)
-        self.pick_cancel = IconButton("close", "Batal")
-        self.pick_cancel.clicked.connect(self.cancel_pick)
-        head.addWidget(self.pick_cancel)
-        pv.addLayout(head)
+        # No button here: the window's own close (top corner) goes BACK to the first screen.
+        pv.addWidget(QLabel("Rekam apa?"))
         choices = QHBoxLayout()
         self.screen_btn = self._btn("screen", " Layar penuh", tip="Rekam seluruh layar utama")
         self.screen_btn.clicked.connect(lambda: self._begin(None))
@@ -1064,8 +1060,12 @@ class Panel(QWidget):
             e.ignore()  # no closing while recording
             self.set_status("Hentikan rekaman dulu (tombol Stop) sebelum menutup aplikasi.", error=True)
             return
+        if self._choosing:  # a sub page: close = back to the page before it, never quit
+            e.ignore()
+            self.cancel_pick()
+            return
         super().closeEvent(e)
-        QApplication.quit()  # the main page is the app: closing it ends the app
+        QApplication.quit()  # only on the main page does close end the app
 
 
 def _prewarm() -> None:
