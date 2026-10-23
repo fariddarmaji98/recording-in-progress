@@ -34,6 +34,19 @@ def is_up_to_date(folder: Path, out_name: str = "full.mp4") -> bool:
     return all(p.stat().st_mtime <= out.stat().st_mtime for p in sources)
 
 
+def timeline_start(folder: Path) -> float:
+    """Recording-timeline second that is second 0 of full.mp4 (the earliest track start).
+
+    Speaker times (speakers.json, transcript.json) are on the recording timeline, so a position in the
+    player maps to timeline = position + timeline_start()."""
+    folder = Path(folder)
+    meta_file = folder / "meta.json"
+    meta = json.loads(meta_file.read_text()) if meta_file.exists() else {}
+    tracks = meta.get("tracks", {})
+    starts = [float(tracks.get(n, {}).get("offset_sec") or 0.0) for n in ("mic", "system") if (folder / f"{n}.wav").exists()]
+    return min([float((meta.get("video") or {}).get("offset_sec") or 0.0)] + starts)
+
+
 def build_full_media(folder: Path, out_name: str = "full.mp4") -> Path:
     folder = Path(folder)
     meta_file = folder / "meta.json"
@@ -48,7 +61,7 @@ def build_full_media(folder: Path, out_name: str = "full.mp4") -> Path:
     if not audio:
         raise FileNotFoundError("tidak ada mic.wav / system.wav untuk digabung")
     v_off = float((meta.get("video") or {}).get("offset_sec") or 0.0)
-    t_start = min([v_off] + [a[3] for a in audio])  # output time 0 = the earliest track start
+    t_start = timeline_start(folder)  # output time 0 = the earliest track start
 
     cmd = [ffmpeg_exe(), "-y", "-loglevel", "error", "-itsoffset", f"{v_off - t_start:.3f}", "-i", str(video)]
     for _, _, path, _ in audio:

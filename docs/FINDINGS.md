@@ -13,6 +13,26 @@ Audio uji: 3 suara TTS sintetis (`testdata/`, lihat `truth.md`). Ini bukti **jal
 | Overlap | Terbaca. Segmen dua pembicara berbeda muncul bersamaan: A∩B 7.96–11.86 (benar 8.0–11.7), B∩C 12.47–15.61 (benar 12.5–15.7). Batas segmen meleset ≤0.2 detik. |
 | Jumlah pembicara otomatis | Bergantung `threshold`: 0.3 menemukan 3 pembicara di `mixed.wav`, 0.4–0.5 menggabungkan A dan B jadi satu. Tapi di sini hanya satu sampel. |
 
+## Jumlah pembicara otomatis pada rekaman nyata (22 Okt 2026)
+
+Rekaman nyata 128 detik (`system.wav`, suara dari perangkat). `FastClusteringConfig.threshold`, jumlah klaster yang ditemukan:
+
+| Ambang | Klaster (total detik bicara) |
+|---|---|
+| 0.3 | 6: 0.5 / 0.7 / 1.7 / 9.0 / 17.9 / 30.8 (9.0 + 17.9 = 26.9) |
+| 0.4 | 4: 0.5 / 0.7 / 27.0 / 32.5 |
+| 0.5 | 2: 33.7 / 26.9 |
+| 0.6 | 2: 33.7 / 26.9 |
+
+0.3 memecah satu klaster 26.9 detik menjadi dua, dan menambah klaster ≤1.7 detik. 0.5 dan 0.6 memberi hasil sama persis, jadi default diubah ke 0.5
+(`DEFAULT_THRESHOLD`). Kebenaran jumlah orang di rekaman itu tidak diketahui (tidak didengarkan); yang terbukti hanya kestabilan 0.5–0.6.
+Pada sampel TTS lama, 0.4–0.5 menggabungkan A dan B (lihat atas): untuk kasus itu pilih jumlah pembicara sendiri.
+
+Transkrip per pembicara pada rekaman nyata yang sama (`meetrec transcribe`, model `small`, bahasa otomatis, Mac 8 GB): 222 detik, memori puncak 1,1 GB,
+17 baris (Remote 1: 9, Remote 2: 6, tak jelas: 2), urut waktu. `mic.wav` menghasilkan 0 baris: dengan filter suara aktif Whisper tidak menemukan ucapan,
+tanpa filter ia menulis kalimat Spanyol yang tak ada di rekaman. Diarization di `mic.wav` tetap menandai 24,8 detik sebagai "Me" (RMS segmen 0,014–0,027,
+sama dengan RMS seluruh track 0,017). Penyebabnya (derau atau suara lawan yang bocor ke mic) belum dibuktikan.
+
 ## ASR: faster-whisper `large-v3-turbo`, int8, CPU
 
 | Hal | Hasil |

@@ -6,6 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .paths import DEFAULT_OUT
+from .speakerdata import DEFAULT_THRESHOLD
 
 
 def cmd_devices(_: argparse.Namespace) -> None:
@@ -63,27 +64,14 @@ def cmd_split(a: argparse.Namespace) -> None:
 
 
 def cmd_transcribe(a: argparse.Namespace) -> None:
-    from .merge import build_turns, interleave, to_markdown
-
     try:
-        from .asr import transcribe
+        from .transcript import build_transcript
+        import faster_whisper  # noqa: F401  (optional package)
     except ImportError:
         raise SystemExit("Transkrip butuh paket opsional: pip install 'meetrec[transcribe]'")
-    from .diarize import diarize
 
     lang = None if a.lang == "auto" else a.lang
-    turns = []
-    mic, system = a.folder / "mic.wav", a.folder / "system.wav"
-    if mic.exists():
-        turns.append(build_turns(transcribe(mic, lang, a.model), None, fixed="Me"))
-    if system.exists():
-        segs = diarize(system, a.speakers, a.threshold)
-        turns.append(build_turns(transcribe(system, lang, a.model), segs))
-    merged = interleave(*turns)
-    (a.folder / "transcript.json").write_text(json.dumps([asdict(t) for t in merged], ensure_ascii=False, indent=1))
-    out = a.folder / "transcript.md"
-    out.write_text(to_markdown(merged))
-    print(out)
+    print(build_transcript(a.folder, lang, a.model, a.speakers, a.threshold))
 
 
 def cmd_fullmedia(a: argparse.Namespace) -> None:
@@ -136,7 +124,7 @@ def main() -> None:
     def pipeline_args(x: argparse.ArgumentParser) -> None:
         x.add_argument("folder", type=Path)
         x.add_argument("--speakers", type=int, default=-1, help="jumlah pembicara remote, -1 = otomatis")
-        x.add_argument("--threshold", type=float, default=0.3, help="ambang otomatis; makin kecil makin banyak pembicara")
+        x.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD, help="ambang otomatis; makin kecil makin banyak pembicara")
 
     t = sub.add_parser("timeline", help="speakers.json: siapa aktif kapan + zona overlap")
     pipeline_args(t)

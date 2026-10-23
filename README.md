@@ -18,12 +18,27 @@ potong per pembicara per section, generate full media, video player.
 | Daftar rekaman + player | Tombol daftar di panel (atau `meetrec player`) membuka jendela sempit berisi **kartu** yang bisa digulir. Kartu: gambar dengan ikon play, nama, ukuran \| durasi \| tipe, tombol **folder**, **hapus** (dipindah ke Sampah, dengan konfirmasi), dan **buat video final**. Klik kartu membuka player (`full.mp4`): pilih track audio **Mix / Mic (Me) / System (Remote)**, kecepatan 0.5×–2×, seek, spasi = putar/jeda, ←/→ = ±5 detik. Panel utama disembunyikan selama daftar atau player terbuka, dan muncul lagi saat ditutup. Gambar kartu di-cache di `~/.meetrec/thumbs` (bukan di folder rekaman). |
 | Timeline `speakers.json` | `sherpa-onnx` (pyannote segmentation-3.0). Segmen pembicara berbeda boleh tumpang tindih; zona overlap dicatat. |
 | Potong per orang `sections/` | Satu wav per pembicara per section + satu klip campuran per zona overlap. |
-| Transkrip teks | Opsional (`pip install -e ".[transcribe]"`). |
+| Transkrip per pembicara `transcript.json` / `.md` | Opsional (`pip install -e ".[transcribe]"`, faster-whisper). Tiap baris: waktu, **siapa**, teks. Kata dari `mic.wav` = "Me"; kata dari `system.wav` = pembicara yang aktif saat itu di `speakers.json`; kata di zona overlap ditandai dua nama dan tidak ditebak. Waktu kedua track diselaraskan lewat `meta.json`. |
 
 Semua orang di Meet/Zoom datang ke perangkatmu sebagai **satu aliran suara**, jadi pemisahan antar peserta remote hanya
 lewat diarization. Di zona overlap antar peserta remote, potongan masing-masing orang masih berisi dua suara
 (klip `_overlaps/` menandai zonanya). Pemisahan suara sungguhan (speech separation) belum ada.
 Pakai headphone supaya suara lawan bicara tidak ikut masuk `mic.wav`.
+
+## Siapa bicara apa (di player)
+
+Buka rekaman di player. Di bawah video ada bagian **Pembicara**:
+
+| Bagian | Fungsi |
+|---|---|
+| **Analisis pembicara** | Menjalankan diarization di komputer ini (±40 detik per 2 menit audio di Mac 8 GB, jalan di latar; file asli tidak diubah) lalu menulis `speakers.json`. |
+| **Remote: otomatis ▾** | Jumlah orang di sisi lawan bicara. Otomatis bisa salah hitung (terlalu banyak atau terlalu sedikit); kalau tahu jumlahnya, pilih sendiri lalu **Analisis ulang**. |
+| **Jalur pembicara** | Satu jalur per orang (Me paling atas), batang berwarna di menit orang itu bicara, jalur oranye = **tumpang tindih**, garis putih = posisi putar. Klik atau seret = loncat ke menit itu. **Klik dua kali nama** = beri nama ("Remote 1" → "Budi"); disimpan di `speakers.json` (`labels`). |
+| **Sedang bicara: …** | Berubah mengikuti putaran: satu nama, dua nama + "(tumpang tindih)", atau "(hening)". |
+| **Buat transkrip** | Menulis apa yang dikatakan tiap orang (pilih bahasa di sebelahnya). Pertama kali mengunduh model Whisper `small` ±480 MB. Di Mac 8 GB: 128 detik rekaman (2 track) selesai dalam 222 detik, memori puncak 1,1 GB. Track yang isinya hanya derau tidak menghasilkan baris (filter suara aktif). Klik satu baris = loncat ke menit itu; baris yang sedang diputar ditandai. |
+
+Cek jumlah pembicara otomatis: pada satu rekaman nyata, ambang 0.3 memecah 2 suara menjadi 6 "pembicara"; ambang 0.5 dan 0.6 sama-sama
+menemukan 2. Karena itu default sekarang 0.5. Pada sampel TTS lama, 0.5 menggabungkan dua suara TTS yang mirip (A dan B): pilih jumlah sendiri bila itu terjadi.
 
 ## Ekstensi Chrome untuk Google Meet (pembeda lebih akurat)
 
@@ -94,16 +109,33 @@ Linux: butuh `libpulse` (PulseAudio atau `pipewire-pulse`). macOS: izinkan **Mic
 - **Mulai:** perangkat dibuka di background, jadi panel tidak membeku. Timer baru berjalan setelah mic dan audio sistem siap; `meta.json` mencatat `ready_sec` dan `offset_sec` tiap track.
 - **Jeda:** audio selama jeda dibuang dari kedua track, jadi keduanya tetap sejajar. `meta.json` mencatat tiap jeda.
 
+## Pasang di Mac (installer)
+
+File: `build/meetrec-0.1.0-macos-arm64.dmg` (±95 MB). Buka, seret **meetrec.app** ke **Applications**, lalu buka dengan klik kanan → Open
+(aplikasi ditandatangani ad hoc, bukan Apple Developer ID; isi "Baca saya.txt" di dalam dmg menjelaskan izin Mikrofon, Perekaman Layar,
+Perekaman Audio Sistem, dan perintah `xattr` bila macOS memblokir). Hanya Apple Silicon (arm64) dan macOS 14.2+. Sudah berisi PySide6, sherpa-onnx,
+faster-whisper, ffmpeg; model pembeda pembicara dan model Whisper diunduh saat pertama dipakai.
+
+Bangun ulang (±4 menit, butuh `.venv` proyek dan PyInstaller):
+
+```bash
+.venv/bin/python -m pip install pyinstaller
+packaging/mac/build_mac.sh
+```
+
+Skrip menjalankan `meetrec --selftest` di dalam aplikasi hasil build lalu membuat dmg di `build/`. Tiap build mengganti tanda tangan ad hoc, jadi macOS
+bisa meminta ulang izin Mikrofon / Layar. GitHub menolak file di atas 100 MiB; dmg ini 95 MiB. Kalau lebih besar, unggah lewat GitHub Releases, bukan commit.
+
 ## Pakai: baris perintah
 
 ```bash
 .venv/bin/meetrec devices                      # cek mic dan speaker terdeteksi
 .venv/bin/meetrec record                       # Ctrl-C untuk berhenti -> ~/Recordings/meetrec/<waktu>/
-.venv/bin/meetrec timeline <folder>            # speakers.json
+.venv/bin/meetrec timeline <folder>            # speakers.json (--speakers N bila jumlah orang remote diketahui)
 .venv/bin/meetrec split <folder>               # sections/ per pembicara + _overlaps/
 .venv/bin/meetrec player [folder]             # putar rekaman (default: yang terbaru dan sudah selesai)
 .venv/bin/meetrec fullmedia <folder>           # full.mp4: video + audio digabung (file asli tetap)
-.venv/bin/meetrec transcribe <folder>          # opsional, butuh extra [transcribe]
+.venv/bin/meetrec transcribe <folder>          # transcript.json + .md per pembicara; opsional, butuh extra [transcribe]
 ```
 
 `full.mp4` berisi 1 video dan 3 audio: **Mix** (semua suara, default), **Mic (Me)**, dan **System (Remote)**,

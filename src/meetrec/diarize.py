@@ -5,6 +5,7 @@ import sherpa_onnx
 
 from .audio import RATE, load_16k_mono
 from .models import diarization_models
+from .speakerdata import DEFAULT_THRESHOLD
 
 
 @dataclass
@@ -14,7 +15,7 @@ class Segment:
     end: float
 
 
-def diarize(wav: str | Path, num_speakers: int = -1, threshold: float = 0.3,
+def diarize(wav: str | Path, num_speakers: int = -1, threshold: float = DEFAULT_THRESHOLD,
             threads: int = 4) -> list[Segment]:
     """Who spoke when. Segments of different speakers may overlap in time (overlapped speech).
 

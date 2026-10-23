@@ -15,14 +15,7 @@ import soundfile as sf
 
 from .audio import RATE, load_16k_mono
 from .diarize import diarize
-
-
-def _offsets(folder: Path) -> dict[str, float]:
-    meta = folder / "meta.json"
-    if not meta.exists():
-        return {}
-    tracks = json.loads(meta.read_text()).get("tracks", {})
-    return {name: float(t.get("offset_sec") or 0.0) for name, t in tracks.items()}
+from .speakerdata import DEFAULT_THRESHOLD, track_offsets as _offsets
 
 
 def find_overlaps(segs: list[dict]) -> list[dict]:
@@ -109,7 +102,7 @@ def name_clusters(remote: list[dict], intervals: list[dict]) -> tuple[dict[str, 
     return mapping, lag, {f"{c} -> {n}": round(o, 1) for (c, n), o in m.items() if mapping.get(c) == n}
 
 
-def build_timeline(folder: Path, remote_speakers: int = -1, threshold: float = 0.3) -> Path:
+def build_timeline(folder: Path, remote_speakers: int = -1, threshold: float = DEFAULT_THRESHOLD) -> Path:
     off = _offsets(folder)
     meet = load_meet(folder)
     hint = None

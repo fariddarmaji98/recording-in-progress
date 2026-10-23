@@ -7,19 +7,22 @@ generated first in the background. video.mp4, mic.wav and system.wav are never c
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 
 import json
 
-from PySide6.QtCore import QFile, QPointF, QRectF, Qt, QThread, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QGuiApplication, QImage, QPainter, QPainterPath, QPen, QPixmap, QPolygonF, QShortcut
+from PySide6.QtCore import QFile, QObject, QPointF, QRectF, Qt, QThread, QUrl, Signal
+from PySide6.QtGui import (QColor, QDesktopServices, QFontMetrics, QGuiApplication, QImage, QPainter, QPainterPath, QPen, QPixmap,
+                           QPolygonF, QShortcut)
 from PySide6.QtMultimedia import QAudioOutput, QMediaMetaData, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
-from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QMessageBox, QPushButton,
-                               QScrollArea, QSlider, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QInputDialog, QLabel, QListWidget,
+                               QListWidgetItem, QMessageBox, QPushButton, QScrollArea, QSlider, QVBoxLayout, QWidget)
 
-from .fullmedia import build_full_media, is_up_to_date
+from .fullmedia import build_full_media, is_up_to_date, timeline_start
 from .paths import DEFAULT_OUT, list_recordings
+from .speakerdata import display_name, load_speakers, load_transcript, set_label
 from .widgets import BUTTON_STYLE, FG, IconButton
 
 # Other pages: the OS's own close + minimize + maximize (no custom buttons).
@@ -39,6 +42,11 @@ QSlider::groove:horizontal { height: 5px; background: #3a4258; border-radius: 2p
 QSlider::sub-page:horizontal { background: #4a6cf7; border-radius: 2px; }
 QSlider::handle:horizontal { width: 14px; margin: -5px 0; border-radius: 7px; background: #e8ebf2; }
 #status { color: #8f98ad; font-size: 12px; }
+#whoTitle { font-weight: 600; }
+#now { color: #cfd5e3; }
+QListWidget { background: #1c2029; border: 1px solid #2c3242; border-radius: 8px; padding: 4px; outline: none; }
+QListWidget::item { padding: 3px 6px; border-radius: 4px; }
+QListWidget::item:selected { background: #2a3350; }
 """ + BUTTON_STYLE
 
 
@@ -63,6 +71,163 @@ class _Builder(QThread):
             self.done.emit(str(e), "")
 
 
+# --- who speaks when -------------------------------------------------------------------------------
+ME_COLOR = "#38c172"
+OVERLAP_COLOR = "#ff8a3d"
+# none of these is the green of "Me" or the orange of overlaps
+SPEAKER_COLORS = ["#4a6cf7", "#d65db1", "#3fb8af", "#9b7bf0", "#4fa8e8", "#e6c84a"]
+LANGUAGES = [("Indonesia", "id"), ("English", "en"), ("Otomatis", None)]
+
+
+def speaker_order(segments: list[dict]) -> list[str]:
+    """Me first, then the others, most talkative first."""
+    tot: dict[str, float] = {}
+    for s in segments:
+        tot[s["speaker"]] = tot.get(s["speaker"], 0.0) + (s["end"] - s["start"])
+    return sorted(tot, key=lambda k: (k != "Me", -tot[k], k))
+
+
+def speaker_colors(order: list[str]) -> dict[str, str]:
+    others = [k for k in order if k != "Me"]
+    return {"Me": ME_COLOR, **{k: SPEAKER_COLORS[i % len(SPEAKER_COLORS)] for i, k in enumerate(others)}}
+
+
+class SpeakerLanes(QWidget):
+    """One lane per speaker, a bar wherever that person talks, a line for the playhead. Click or drag = seek.
+    Times given to it are player seconds (timeline seconds minus the player's start)."""
+
+    seek = Signal(int)       # player position in milliseconds
+    rename = Signal(str)     # speaker id whose name was double-clicked
+
+    LABEL_W, LANE_H, GAP, PAD = 120, 18, 4, 6
+
+    def __init__(self):
+        super().__init__()
+        self.lanes: list[str] = []
+        self.names: dict[str, str] = {}
+        self.colors: dict[str, str] = {}
+        self.segs: dict[str, list[tuple[float, float]]] = {}
+        self.overlaps: list[tuple[float, float]] = []
+        self.dur = 0.0
+        self.pos = 0.0
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMouseTracking(True)
+        self.setFixedHeight(self.PAD * 2)
+
+    # --- data ------------------------------------------------------------------------------------
+    def set_data(self, doc: dict, t_start: float) -> None:
+        segments = doc.get("segments", [])
+        self.lanes = speaker_order(segments)
+        self.colors = speaker_colors(self.lanes)
+        self.names = {k: display_name(doc, k) for k in self.lanes}
+        self.segs = {k: [(s["start"] - t_start, s["end"] - t_start) for s in segments if s["speaker"] == k] for k in self.lanes}
+        self.overlaps = [(o["start"] - t_start, o["end"] - t_start) for o in doc.get("overlaps", [])]
+        self.setFixedHeight(self.PAD * 2 + self._rows() * (self.LANE_H + self.GAP) - self.GAP)
+        self.update()
+
+    def clear(self) -> None:
+        self.lanes, self.segs, self.overlaps = [], {}, []
+        self.setFixedHeight(self.PAD * 2)
+        self.update()
+
+    def set_duration(self, sec: float) -> None:
+        self.dur = max(0.0, sec)
+        self.update()
+
+    def set_position(self, sec: float) -> None:
+        self.pos = sec
+        self.update()
+
+    def _rows(self) -> int:
+        return len(self.lanes) + (1 if self.overlaps else 0)
+
+    def active_at(self, t: float) -> list[str]:
+        return [k for k in self.lanes if any(a <= t < b for a, b in self.segs[k])]
+
+    # --- geometry ----------------------------------------------------------------------------------
+    def _bar_x(self, t: float) -> float:
+        w = self.width() - self.LABEL_W - self.PAD
+        return self.LABEL_W + (min(max(t, 0.0), self.dur) / self.dur * w if self.dur > 0 else 0.0)
+
+    def time_at(self, x: float) -> float:
+        w = self.width() - self.LABEL_W - self.PAD
+        return min(max((x - self.LABEL_W) / w, 0.0), 1.0) * self.dur if w > 0 else 0.0
+
+    def lane_at(self, y: float) -> str | None:
+        row = int((y - self.PAD) // (self.LANE_H + self.GAP))
+        return self.lanes[row] if 0 <= row < len(self.lanes) else None
+
+    # --- painting ----------------------------------------------------------------------------------
+    def paintEvent(self, _e) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        fm = QFontMetrics(self.font())
+        rows = [(k, self.names[k], self.segs[k], QColor(self.colors[k])) for k in self.lanes]
+        if self.overlaps:
+            rows.append((None, "Tumpang tindih", self.overlaps, QColor(OVERLAP_COLOR)))
+        for i, (_k, name, segs, color) in enumerate(rows):
+            y = self.PAD + i * (self.LANE_H + self.GAP)
+            p.setPen(QColor("#cfd5e3"))
+            p.drawText(QRectF(0, y, self.LABEL_W - 8, self.LANE_H), int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft),
+                       fm.elidedText(name, Qt.TextElideMode.ElideRight, self.LABEL_W - 8))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor("#1c2029"))
+            p.drawRoundedRect(QRectF(self.LABEL_W, y, self.width() - self.LABEL_W - self.PAD, self.LANE_H), 4, 4)
+            p.setBrush(color)
+            for a, b in segs:
+                x0, x1 = self._bar_x(a), self._bar_x(b)
+                if x1 > x0 or b > a:
+                    p.drawRoundedRect(QRectF(x0, y + 2, max(2.0, x1 - x0), self.LANE_H - 4), 3, 3)
+        if self.dur > 0 and rows:
+            x = self._bar_x(self.pos)
+            p.setPen(QPen(QColor("#ffffff"), 2))
+            p.drawLine(QPointF(x, 0), QPointF(x, self.height()))
+        p.end()
+
+    # --- mouse -------------------------------------------------------------------------------------
+    def mousePressEvent(self, e) -> None:
+        if e.button() == Qt.MouseButton.LeftButton and e.position().x() >= self.LABEL_W:
+            self.seek.emit(int(self.time_at(e.position().x()) * 1000))
+
+    def mouseMoveEvent(self, e) -> None:
+        if e.buttons() & Qt.MouseButton.LeftButton and e.position().x() >= self.LABEL_W:
+            self.seek.emit(int(self.time_at(e.position().x()) * 1000))
+
+    def mouseDoubleClickEvent(self, e) -> None:
+        k = self.lane_at(e.position().y())
+        if e.position().x() < self.LABEL_W and k:
+            self.rename.emit(k)
+
+
+class _Job(QObject):
+    """Runs one slow function (analysis, transcript) on a plain daemon thread, so closing the window or the app
+    never waits for it. `done` carries the error text ("" = ok)."""
+
+    done = Signal(str)
+
+    def __init__(self, fn):
+        super().__init__()
+        self.fn = fn
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._run, daemon=True, name="meetrec-job")
+        self._thread.start()
+
+    def isRunning(self) -> bool:
+        return bool(self._thread and self._thread.is_alive())
+
+    def _run(self) -> None:
+        try:
+            self.fn()
+        except ImportError as e:
+            self.done.emit(f"paket belum terpasang: {e}. Pasang dengan: pip install -e \".[transcribe]\"")
+        except Exception as e:
+            self.done.emit(str(e) or e.__class__.__name__)
+        else:
+            self.done.emit("")
+
+
 class PlayerWindow(QWidget):
     closed = Signal()  # emitted once, when the window is closed (the panel then comes back)
 
@@ -70,11 +235,19 @@ class PlayerWindow(QWidget):
         super().__init__(None, FULL_WINDOW_FLAGS)
         self.setWindowTitle("meetrec: putar rekaman")
         self.setStyleSheet(STYLE)
-        self.resize(980, 660)
+        self.resize(980, 720)
         self.root = Path(root)
         self.folder: Path | None = None
         self._builder: _Builder | None = None
         self._seeking = False
+        self._job: _Job | None = None
+        self._ok_text = ""
+        self._closed = False
+        self.t_start = 0.0        # recording-timeline second that is second 0 of the player
+        self.speakers: dict | None = None
+        self.turns: list[dict] = []
+        self._turn_starts: list[float] = []
+        self._turn_row = -1
 
         self.player = QMediaPlayer(self)
         self.audio = QAudioOutput(self)
@@ -101,6 +274,47 @@ class PlayerWindow(QWidget):
         top.addWidget(self.gen_btn)
         v.addWidget(self.picker_row)
         v.addWidget(self.video, 1)
+
+        self.who_box = QWidget()  # who speaks when (and, optionally, what they said)
+        wv = QVBoxLayout(self.who_box)
+        wv.setContentsMargins(0, 0, 0, 0)
+        wv.setSpacing(4)
+        head = QHBoxLayout()
+        head.addWidget(QLabel("Pembicara", objectName="whoTitle"))
+        self.now_lbl = QLabel("", objectName="now")
+        head.addWidget(self.now_lbl, 1)
+        self.analyze_btn = QPushButton("Analisis pembicara")
+        self.analyze_btn.setToolTip("Cari siapa bicara kapan (termasuk saat bicara barengan). Berjalan di komputer ini; file asli tidak diubah.")
+        self.analyze_btn.clicked.connect(self.analyze)
+        self.count = QComboBox()
+        self.count.addItem("Remote: otomatis")
+        for n in range(1, 9):
+            self.count.addItem(f"Remote: {n} orang")
+        self.count.setToolTip("Jumlah orang di sisi lawan bicara (bukan kamu). Otomatis kadang salah hitung: kalau tahu jumlahnya, pilih sendiri lalu Analisis ulang.")
+        self.lang = QComboBox()
+        for label, _code in LANGUAGES:
+            self.lang.addItem(label)
+        self.lang.setToolTip("Bahasa untuk transkrip")
+        self.text_btn = QPushButton("Buat transkrip")
+        self.text_btn.setToolTip("Tulis apa yang dikatakan tiap pembicara. Butuh paket faster-whisper; pertama kali mengunduh model ±480 MB.")
+        self.text_btn.clicked.connect(self.transcribe)
+        head.addWidget(self.count)
+        head.addWidget(self.analyze_btn)
+        head.addWidget(self.lang)
+        head.addWidget(self.text_btn)
+        wv.addLayout(head)
+        self.lanes = SpeakerLanes()
+        self.lanes.setToolTip("Klik = loncat ke menit itu. Klik dua kali nama = beri nama pembicara.")
+        self.lanes.seek.connect(self.player.setPosition)
+        self.lanes.rename.connect(self.rename_speaker)
+        wv.addWidget(self.lanes)
+        self.lines = QListWidget()
+        self.lines.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # keep Space / arrows for the player
+        self.lines.setFixedHeight(150)
+        self.lines.itemClicked.connect(self._line_clicked)
+        wv.addWidget(self.lines)
+        v.addWidget(self.who_box)
+        self._show_who()
 
         ctl = QHBoxLayout()
         self.play_btn = QPushButton("▶  Putar")
@@ -161,6 +375,7 @@ class PlayerWindow(QWidget):
         for w in (self.play_btn, self.slider, self.tracks, self.speed):
             w.setEnabled(controls)
         self.gen_btn.setEnabled(controls if generate is None else generate)
+        self._who_buttons()
 
     def refresh_list(self) -> None:
         self.recordings.clear()
@@ -176,6 +391,8 @@ class PlayerWindow(QWidget):
     def open_folder(self, folder: Path) -> None:
         self.player.stop()
         self.folder = Path(folder)
+        self.t_start = timeline_start(self.folder)
+        self.load_who()
         for i in range(self.recordings.count()):
             if self.recordings.itemData(i) == self.folder:
                 self.recordings.setCurrentIndex(i)
@@ -228,16 +445,137 @@ class PlayerWindow(QWidget):
 
     def _duration(self, ms: int) -> None:
         self.slider.setRange(0, ms)
+        self.lanes.set_duration(ms / 1000)
         self.time_lbl.setText(f"{_clock(self.player.position())} / {_clock(ms)}")
 
     def _position(self, ms: int) -> None:
         if not self._seeking:
             self.slider.setValue(ms)
         self.time_lbl.setText(f"{_clock(ms)} / {_clock(self.player.duration())}")
+        self._follow(ms / 1000)
 
     def _released(self) -> None:
         self._seeking = False
         self.player.setPosition(self.slider.value())
+
+    # --- who speaks when ---------------------------------------------------------------------------
+    def load_who(self) -> None:
+        """Read speakers.json / transcript.json of the open recording (if the analysis was done before)."""
+        self.speakers = load_speakers(self.folder) if self.folder else None
+        self.turns = (load_transcript(self.folder) or []) if self.folder else []
+        self._turn_starts = [t["start"] - self.t_start for t in self.turns]
+        self._turn_row = -1
+        if self.speakers:
+            self.lanes.set_data(self.speakers, self.t_start)
+            self.lanes.set_duration(self.player.duration() / 1000)
+        else:
+            self.lanes.clear()
+        self._fill_lines()
+        self._show_who()
+        self._follow(self.player.position() / 1000)
+
+    def _show_who(self) -> None:
+        has_audio = bool(self.folder and any((self.folder / n).exists() for n in ("mic.wav", "system.wav")))
+        self.who_box.setVisible(has_audio)
+        self.lanes.setVisible(bool(self.speakers and self.speakers["segments"]))
+        self.lines.setVisible(bool(self.turns))
+        self.analyze_btn.setText("Analisis ulang" if self.speakers else "Analisis pembicara")
+        self.text_btn.setText("Buat ulang transkrip" if self.turns else "Buat transkrip")
+        if not self.speakers:
+            self.now_lbl.setText("")
+        self._who_buttons()
+
+    def _who_buttons(self) -> None:
+        busy = bool(self._job and self._job.isRunning())
+        has_audio = bool(self.folder and any((self.folder / n).exists() for n in ("mic.wav", "system.wav")))
+        for w in (self.analyze_btn, self.text_btn, self.lang, self.count):
+            w.setEnabled(has_audio and not busy)
+
+    def _name(self, speaker: str) -> str:
+        return "Tidak jelas" if speaker == "?" else display_name(self.speakers or {}, speaker)  # "?" = word outside every speaker segment
+
+    def _fill_lines(self) -> None:
+        self.lines.clear()
+        colors = self.lanes.colors
+        for t in self.turns:
+            ids = t["speaker"].split("|")
+            who = " + ".join(self._name(k) for k in ids) + (" (tumpang tindih)" if len(ids) > 1 else "")
+            item = QListWidgetItem(f"{_clock(int((t['start'] - self.t_start) * 1000))}  {who}: {t['text']}")
+            item.setForeground(QColor(OVERLAP_COLOR if len(ids) > 1 else colors.get(ids[0], "#cfd5e3")))
+            item.setData(Qt.ItemDataRole.UserRole, t["start"] - self.t_start)
+            self.lines.addItem(item)
+
+    def _follow(self, sec: float) -> None:
+        """Playback moved: say who is talking now and mark the matching transcript line."""
+        if self.speakers:
+            names = [self._name(k) for k in self.lanes.active_at(sec)]
+            text = "" if not self.speakers["segments"] else ("Sedang bicara: " + " + ".join(names) + (" (tumpang tindih)" if len(names) > 1 else "")
+                                                             if names else "Sedang bicara: (hening)")
+            if text != self.now_lbl.text():
+                self.now_lbl.setText(text)
+        self.lanes.set_position(sec)
+        if self._turn_starts:
+            from bisect import bisect_right
+
+            row = bisect_right(self._turn_starts, sec) - 1
+            if row != self._turn_row and row >= 0:
+                self._turn_row = row
+                self.lines.setCurrentRow(row)
+                self.lines.scrollToItem(self.lines.item(row), QListWidget.ScrollHint.PositionAtCenter)
+
+    def _line_clicked(self, item: QListWidgetItem) -> None:
+        self.player.setPosition(max(0, int(item.data(Qt.ItemDataRole.UserRole) * 1000)))
+
+    def _ask_name(self, speaker: str, current: str) -> str | None:
+        text, ok = QInputDialog.getText(self, "Nama pembicara", f"Nama untuk \"{speaker}\" (kosong = nama asli):", text=current)
+        return text if ok else None
+
+    def rename_speaker(self, speaker: str) -> None:
+        if not self.folder or not self.speakers:
+            return
+        name = self._ask_name(speaker, self._name(speaker))
+        if name is None:
+            return
+        set_label(self.folder, speaker, name)
+        self.load_who()
+
+    def _run_job(self, fn, busy_text: str, ok_text: str) -> None:
+        if not self.folder or (self._job and self._job.isRunning()):
+            return
+        self.set_status(busy_text)
+        self._ok_text = ok_text
+        self._job = _Job(fn)
+        self._job.done.connect(self._job_done)
+        self._who_buttons_busy()
+        self._job.start()
+
+    def _who_buttons_busy(self) -> None:
+        for w in (self.analyze_btn, self.text_btn, self.lang, self.count):
+            w.setEnabled(False)
+
+    def _job_done(self, err: str) -> None:
+        if self._closed:
+            return
+        self._who_buttons()
+        if err:
+            self.set_status(f"Gagal: {err}", True)
+            return
+        self.load_who()
+        self.set_status(self._ok_text)
+
+    def analyze(self) -> None:
+        from .timeline import build_timeline
+
+        folder, n = self.folder, self.count.currentIndex() or -1  # first item = automatic
+        self._run_job(lambda: build_timeline(folder, n), "Menganalisis pembicara… (rekaman panjang bisa beberapa menit)",
+                      "Analisis pembicara selesai. Klik dua kali nama di kiri untuk memberi nama.")
+
+    def transcribe(self) -> None:
+        from .transcript import build_transcript
+
+        folder, code = self.folder, LANGUAGES[self.lang.currentIndex()][1]
+        self._run_job(lambda: build_transcript(folder, code), "Membuat transkrip… (pertama kali mengunduh model ±480 MB; bisa beberapa menit)",
+                      "Transkrip selesai. Klik satu baris untuk loncat ke menit itu.")
 
     # --- audio tracks ------------------------------------------------------------------------------
     def _fill_tracks(self) -> None:
@@ -262,6 +600,7 @@ class PlayerWindow(QWidget):
             self.player.setActiveAudioTrack(i)
 
     def closeEvent(self, e) -> None:
+        self._closed = True  # a running analysis keeps writing its files; nobody waits for it
         self.player.stop()
         if self._builder:
             self._builder.wait(5000)
