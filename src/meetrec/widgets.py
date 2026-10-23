@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
-from PySide6.QtWidgets import QPushButton
+from PySide6.QtWidgets import QFrame, QLabel, QListWidget, QPushButton, QStackedWidget, QVBoxLayout, QHBoxLayout, QWidget
 
 FG = "#e8ebf2"
 
@@ -74,6 +74,24 @@ def make_icon(name: str, color: str = FG) -> QIcon:
         p.drawLine(28, 18, 40, 18)
     elif name == "check":
         p.drawPolyline([QPointF(10, 25), QPointF(20, 35), QPointF(38, 14)])
+    elif name == "upload":  # arrow up out of a tray
+        p.drawLine(24, 31, 24, 10)
+        p.drawPolyline([P(14, 20), P(24, 10), P(34, 20)])
+        p.drawPolyline([P(10, 32), P(10, 39), P(38, 39), P(38, 32)])
+    elif name == "download":  # arrow down into a tray
+        p.drawLine(24, 9, 24, 30)
+        p.drawPolyline([P(14, 20), P(24, 30), P(34, 20)])
+        p.drawPolyline([P(10, 32), P(10, 39), P(38, 39), P(38, 32)])
+    elif name == "cloud":
+        path = QPainterPath(P(14, 36))
+        path.cubicTo(P(4, 36), P(4, 22), P(15, 22))
+        path.cubicTo(P(16, 10), P(36, 10), P(36, 24))
+        path.cubicTo(P(46, 24), P(46, 36), P(36, 36))
+        path.closeSubpath()
+        p.drawPath(path)
+    elif name == "plus":
+        p.drawLine(24, 9, 24, 39)
+        p.drawLine(9, 24, 39, 24)
     elif name == "text":
         p.drawLine(12, 12, 36, 12)
         p.drawLine(24, 12, 24, 38)
@@ -120,3 +138,106 @@ QPushButton[tone="primary"]:disabled {{ background: #1f5a2c; }}
 QPushButton[tone="danger"] {{ background: #d03b3b; }}
 QPushButton[tone="danger"]:hover {{ background: #e24c4c; }}
 """
+
+
+class Section(QFrame):
+    """A titled, bordered block (the look of the panel's sections). Put widgets/layouts into `.body`."""
+
+    def __init__(self, title: str = ""):
+        super().__init__()
+        self.setObjectName("section")
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(12, 10, 12, 12)
+        outer.setSpacing(8)
+        self.title = QLabel(title, objectName="sectionTitle")
+        self.title.setVisible(bool(title))
+        outer.addWidget(self.title)
+        self.body = QVBoxLayout()
+        self.body.setSpacing(8)
+        outer.addLayout(self.body)
+
+
+class SidebarPages(QWidget):
+    """Menu on the left, page on the right. add_page(title, widget); the first page is shown first."""
+
+    SIDEBAR_W = 150
+
+    def __init__(self):
+        super().__init__()
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(12)
+        self.menu = QListWidget(objectName="sidebar")
+        self.menu.setFixedWidth(self.SIDEBAR_W)
+        self.menu.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.pages = QStackedWidget()
+        row.addWidget(self.menu)
+        row.addWidget(self.pages, 1)
+        self.menu.currentRowChanged.connect(self.pages.setCurrentIndex)
+
+    def add_page(self, title: str, page: QWidget) -> None:
+        self.menu.addItem(title)
+        self.pages.addWidget(page)
+        if self.menu.count() == 1:
+            self.menu.setCurrentRow(0)
+
+    def titles(self) -> list[str]:
+        return [self.menu.item(i).text() for i in range(self.menu.count())]
+
+    def set_page(self, index: int) -> None:
+        self.menu.setCurrentRow(index)
+
+
+SECTION_STYLE = """
+#section { border: 1px solid #2c3242; border-radius: 10px; background: transparent; }
+#sectionTitle { font-size: 14px; font-weight: 600; }
+#sidebar { background: #171b24; border: none; border-radius: 10px; padding: 6px; outline: none; }
+#sidebar::item { padding: 9px 12px; border-radius: 8px; color: #cfd5e3; }
+#sidebar::item:selected { background: #4a6cf7; color: #ffffff; }
+#sidebar::item:hover:!selected { background: #232836; }
+"""
+
+
+class ProgressIconButton(IconButton):
+    """An IconButton for something that takes time (upload). set_state(state, progress):
+    idle    -> `idle_icon`
+    running -> pause icon inside a progress ring (click = pause)
+    paused  -> play icon inside a paused ring (click = resume)
+    done    -> check icon, green
+    error   -> `idle_icon`, red (the tooltip carries the reason)
+    The ring is drawn over the normal button, so the button keeps its exact square size."""
+
+    RING = "#4a6cf7"
+    RING_PAUSED = "#e0a03a"
+    TRACK = "#3a4258"
+
+    def __init__(self, idle_icon: str, tip: str = ""):
+        super().__init__(idle_icon, tip)
+        self.idle_icon, self.idle_tip = idle_icon, tip
+        self.state, self.progress = "idle", 0.0
+
+    def set_state(self, state: str, progress: float = 0.0, tip: str = "") -> None:
+        self.state, self.progress = state, max(0.0, min(1.0, progress))
+        icon = {"running": "pause", "paused": "play", "done": "check"}.get(state, self.idle_icon)
+        self.setIcon(make_icon(icon))
+        tone = {"done": "primary", "error": "danger"}.get(state, "default")
+        if self.property("tone") != tone:
+            self.setProperty("tone", tone)
+            self.style().unpolish(self)
+            self.style().polish(self)
+        self.setToolTip(tip or self.idle_tip)
+        self.update()
+
+    def paintEvent(self, e) -> None:
+        super().paintEvent(e)
+        if self.state not in ("running", "paused"):
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = QRectF(self.rect()).adjusted(3.5, 3.5, -3.5, -3.5)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(QColor(self.TRACK), 3))
+        p.drawEllipse(r)
+        p.setPen(QPen(QColor(self.RING if self.state == "running" else self.RING_PAUSED), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        p.drawArc(r, 90 * 16, -int(self.progress * 360 * 16))  # starts at 12 o'clock, clockwise
+        p.end()

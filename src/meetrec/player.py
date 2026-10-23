@@ -7,23 +7,25 @@ generated first in the background. video.mp4, mic.wav and system.wav are never c
 from __future__ import annotations
 
 import sys
-import threading
 from pathlib import Path
 
 import json
 
-from PySide6.QtCore import QFile, QObject, QPointF, QRectF, Qt, QThread, QUrl, Signal
+from PySide6.QtCore import QFile, QPointF, QRectF, Qt, QThread, QUrl, Signal
 from PySide6.QtGui import (QColor, QDesktopServices, QFontMetrics, QGuiApplication, QImage, QPainter, QPainterPath, QPen, QPixmap,
                            QPolygonF, QShortcut)
 from PySide6.QtMultimedia import QAudioOutput, QMediaMetaData, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QInputDialog, QLabel, QListWidget,
-                               QListWidgetItem, QMessageBox, QPushButton, QScrollArea, QSlider, QVBoxLayout, QWidget)
+                               QListWidgetItem, QMessageBox, QPushButton, QScrollArea, QSlider, QStackedWidget, QTabBar, QVBoxLayout, QWidget)
 
+from .job import Job
+from . import cloud
 from .fullmedia import build_full_media, is_up_to_date, timeline_start
 from .paths import DEFAULT_OUT, list_recordings
 from .speakerdata import display_name, load_speakers, load_transcript, set_label
-from .widgets import BUTTON_STYLE, FG, IconButton
+from .upload import ACTIVE, Upload, UploadManager, list_cloud_recordings
+from .widgets import BUTTON_STYLE, FG, IconButton, ProgressIconButton, make_icon
 
 # Other pages: the OS's own close + minimize + maximize (no custom buttons).
 FULL_WINDOW_FLAGS = (Qt.WindowType.Window | Qt.WindowType.WindowTitleHint | Qt.WindowType.WindowSystemMenuHint
@@ -199,35 +201,6 @@ class SpeakerLanes(QWidget):
             self.rename.emit(k)
 
 
-class _Job(QObject):
-    """Runs one slow function (analysis, transcript) on a plain daemon thread, so closing the window or the app
-    never waits for it. `done` carries the error text ("" = ok)."""
-
-    done = Signal(str)
-
-    def __init__(self, fn):
-        super().__init__()
-        self.fn = fn
-        self._thread: threading.Thread | None = None
-
-    def start(self) -> None:
-        self._thread = threading.Thread(target=self._run, daemon=True, name="meetrec-job")
-        self._thread.start()
-
-    def isRunning(self) -> bool:
-        return bool(self._thread and self._thread.is_alive())
-
-    def _run(self) -> None:
-        try:
-            self.fn()
-        except ImportError as e:
-            self.done.emit(f"paket belum terpasang: {e}. Pasang dengan: pip install -e \".[transcribe]\"")
-        except Exception as e:
-            self.done.emit(str(e) or e.__class__.__name__)
-        else:
-            self.done.emit("")
-
-
 class PlayerWindow(QWidget):
     closed = Signal()  # emitted once, when the window is closed (the panel then comes back)
 
@@ -240,7 +213,7 @@ class PlayerWindow(QWidget):
         self.folder: Path | None = None
         self._builder: _Builder | None = None
         self._seeking = False
-        self._job: _Job | None = None
+        self._job: Job | None = None
         self._ok_text = ""
         self._closed = False
         self.t_start = 0.0        # recording-timeline second that is second 0 of the player
@@ -544,7 +517,13 @@ class PlayerWindow(QWidget):
             return
         self.set_status(busy_text)
         self._ok_text = ok_text
-        self._job = _Job(fn)
+        def guarded():
+            try:
+                return fn()
+            except ImportError as e:  # the transcript needs the optional faster-whisper package
+                raise RuntimeError(f'paket belum terpasang: {e}. Pasang dengan: pip install -e ".[transcribe]"') from e
+
+        self._job = Job(guarded)
         self._job.done.connect(self._job_done)
         self._who_buttons_busy()
         self._job.start()
@@ -619,6 +598,10 @@ CARD_STYLE = """
 #recName { font-size: 14px; font-weight: 600; }
 #recMeta { color: #8f98ad; font-size: 12px; }
 #recTitle { font-size: 16px; font-weight: 600; }
+#cloudTile { background: #0f1218; border-radius: 8px; }
+QTabBar::tab { background: #1c2029; color: #8f98ad; padding: 7px 0; border: none; border-radius: 8px; min-width: 100px; margin-right: 6px; }
+QTabBar::tab:selected { background: #4a6cf7; color: #ffffff; }
+QTabBar::tab:hover:!selected { background: #232836; }
 QScrollArea { border: none; background: transparent; }
 QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
 QScrollBar::handle:vertical { background: #3a4258; border-radius: 4px; min-height: 30px; }
@@ -743,12 +726,13 @@ class Thumb(QWidget):
 
 
 class RecordingCard(QFrame):
-    """picture + play badge · name · size | duration | type · [folder] [delete] [final video]. Click = play."""
+    """picture + play badge · name · size | duration | type · [folder] [delete] [final video] [upload]. Click = play."""
 
     clicked = Signal(object)
     folder_clicked = Signal(object)
     delete_clicked = Signal(object)
     final_clicked = Signal(object)
+    upload_clicked = Signal(object)
 
     def __init__(self, folder: Path):
         super().__init__(objectName="recCard")
@@ -772,7 +756,8 @@ class RecordingCard(QFrame):
         self.folder_btn = IconButton("folder", "Buka folder rekaman")
         self.delete_btn = IconButton("trash", "Hapus rekaman (dipindah ke Sampah)")
         self.final_btn = IconButton("final", "Buat video final (video + suara jadi satu file)")
-        for b in (self.folder_btn, self.delete_btn, self.final_btn):
+        self.upload_btn = ProgressIconButton("upload", "Upload ke cloud (tujuan di Pengaturan > Cloud)")
+        for b in (self.folder_btn, self.delete_btn, self.final_btn, self.upload_btn):
             row.addWidget(b)
         row.addStretch(1)
         col.addLayout(row)
@@ -780,6 +765,7 @@ class RecordingCard(QFrame):
         self.folder_btn.clicked.connect(lambda: self.folder_clicked.emit(self.folder))
         self.delete_btn.clicked.connect(lambda: self.delete_clicked.emit(self.folder))
         self.final_btn.clicked.connect(lambda: self.final_clicked.emit(self.folder))
+        self.upload_btn.clicked.connect(lambda: self.upload_clicked.emit(self.folder))
         self.refresh_info()
 
     def refresh_info(self) -> dict:
@@ -788,6 +774,21 @@ class RecordingCard(QFrame):
         self.meta_lbl.setText(info["text"])
         self.final_btn.setToolTip("Buat ulang video final" if info["final"] else "Buat video final (video + suara jadi satu file)")
         return info
+
+    def show_upload(self, up: Upload | None) -> None:
+        """Button look for the upload of this recording: idle, ring with progress (click = pause), paused, done, error."""
+        b = self.upload_btn
+        if up is None or up.state == "cancelled":
+            return b.set_state("idle")
+        pct = int(up.progress * 100)
+        if up.state == "running":
+            b.set_state("running", up.progress, f"Mengunggah {pct}% — klik untuk jeda")
+        elif up.state == "paused":
+            b.set_state("paused", up.progress, f"Dijeda di {pct}% — klik untuk lanjut")
+        elif up.state == "done":
+            b.set_state("done", 1.0, f"Terunggah ke {up.remote}. Klik untuk unggah ulang")
+        else:
+            b.set_state("error", 0.0, f"Upload gagal: {up.message}. Klik untuk coba lagi")
 
     def set_busy(self, busy: bool) -> None:
         self.final_btn.setEnabled(not busy)
@@ -802,13 +803,68 @@ class RecordingCard(QFrame):
             super().mousePressEvent(e)
 
 
+class CloudCard(QFrame):
+    """A recording folder found in the cloud: tile · name · size | files | date · [download]."""
+
+    download_clicked = Signal(str)
+
+    def __init__(self, info: dict, local: bool):
+        super().__init__(objectName="recCard")
+        self.name = info["name"]
+        h = QHBoxLayout(self)
+        h.setContentsMargins(10, 10, 12, 10)
+        h.setSpacing(12)
+        tile = QLabel(objectName="cloudTile")
+        tile.setFixedSize(Thumb.W, Thumb.H)
+        tile.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        tile.setPixmap(make_icon("cloud", "#5d667c").pixmap(48, 48))
+        h.addWidget(tile)
+        col = QVBoxLayout()
+        col.setSpacing(4)
+        self.name_lbl = QLabel(self.name, objectName="recName")
+        self.meta_lbl = QLabel(objectName="recMeta")
+        self.meta_lbl.setWordWrap(True)
+        self.info = info
+        col.addWidget(self.name_lbl)
+        col.addWidget(self.meta_lbl)
+        col.addStretch(1)
+        row = QHBoxLayout()
+        self.download_btn = ProgressIconButton("download", "Unduh ke komputer ini (masuk ke daftar Local)")
+        row.addWidget(self.download_btn)
+        row.addStretch(1)
+        col.addLayout(row)
+        h.addLayout(col, 1)
+        self.download_btn.clicked.connect(lambda: self.download_clicked.emit(self.name))
+        self.set_local(local)
+
+    def set_local(self, local: bool) -> None:
+        i = self.info
+        text = " | ".join([fmt_size(i["size"]), f"{i['files']} file"] + ([i["modified"][:10]] if i["modified"] else []))
+        self.meta_lbl.setText(text + ("  ·  sudah ada di komputer" if local else ""))
+
+    def show_download(self, dl: Upload | None) -> None:
+        b = self.download_btn
+        if dl is None or dl.state == "cancelled":
+            return b.set_state("idle")
+        pct = int(dl.progress * 100)
+        if dl.state == "running":
+            b.set_state("running", dl.progress, f"Mengunduh {pct}% — klik untuk jeda")
+        elif dl.state == "paused":
+            b.set_state("paused", dl.progress, f"Dijeda di {pct}% — klik untuk lanjut")
+        elif dl.state == "done":
+            b.set_state("done", 1.0, f"Terunduh ke {dl.folder}. Klik untuk unduh ulang (berkas yang sama dilewati)")
+        else:
+            b.set_state("error", 0.0, f"Unduh gagal: {dl.message}. Klik untuk coba lagi")
+
+
 class RecordingsWindow(QWidget):
     """Compact scrolling list of finished recordings. Clicking a card opens the player for it (list hides,
     comes back when the player closes). Closing this window announces `closed` (the panel comes back)."""
 
     closed = Signal()
 
-    def __init__(self, root: Path = DEFAULT_OUT, cache_dir: Path = CACHE_DIR, trash=None, open_folder=None):
+    def __init__(self, root: Path = DEFAULT_OUT, cache_dir: Path = CACHE_DIR, trash=None, open_folder=None,
+                 uploads: UploadManager | None = None):
         super().__init__(None, FULL_WINDOW_FLAGS)
         self.setWindowTitle("meetrec: rekaman")
         self.setStyleSheet(STYLE + CARD_STYLE)
@@ -817,6 +873,14 @@ class RecordingsWindow(QWidget):
         self._trash = trash or (lambda path: QFile.moveToTrash(path))
         self._open_folder = open_folder or (lambda path: QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))))
         self.cards: dict[Path, RecordingCard] = {}
+        self.uploads = uploads  # None: no upload buttons (nothing to upload to)
+        if uploads is not None:
+            uploads.changed.connect(self._upload_changed)
+            uploads.download_changed.connect(self._download_changed)
+        self.cloud_cards: dict[str, CloudCard] = {}
+        self._cloud_key = None        # (account, folder) the cloud list was loaded for
+        self._cloud_stale = True      # something may have changed in the cloud since
+        self._cloud_job: Job | None = None
         self._builders: dict[Path, _Builder] = {}
         self._loader: ThumbLoader | None = None
         self._player: PlayerWindow | None = None
@@ -832,6 +896,19 @@ class RecordingsWindow(QWidget):
         v.setSpacing(8)
         self.title_lbl = QLabel("Rekaman", objectName="recTitle")
         v.addWidget(self.title_lbl)
+        self.tabs = QTabBar()  # Local = what is on this computer (upload), Cloud = what is in the cloud (download)
+        self.tabs.addTab("Local")
+        self.tabs.addTab("Cloud")
+        self.tabs.setExpanding(True)
+        self.tabs.setDrawBase(False)
+        self.tabs.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.tabs.setVisible(uploads is not None)  # no cloud without an upload manager
+        v.addWidget(self.tabs)
+        self.stack = QStackedWidget()
+        local = QWidget()
+        lv = QVBoxLayout(local)
+        lv.setContentsMargins(0, 0, 0, 0)
+        lv.setSpacing(8)
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -842,10 +919,40 @@ class RecordingsWindow(QWidget):
         self.cards_box.setSpacing(10)
         self.cards_box.addStretch(1)
         self.scroll.setWidget(inner)
-        v.addWidget(self.scroll, 1)
+        lv.addWidget(self.scroll, 1)
         self.empty_lbl = QLabel("Belum ada rekaman yang selesai.", objectName="status")
         self.empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        v.addWidget(self.empty_lbl)
+        lv.addWidget(self.empty_lbl)
+        self.stack.addWidget(local)
+
+        cloud_page = QWidget()
+        cv = QVBoxLayout(cloud_page)
+        cv.setContentsMargins(0, 0, 0, 0)
+        cv.setSpacing(8)
+        head = QHBoxLayout()
+        self.cloud_target_lbl = QLabel("", objectName="status")
+        self.cloud_refresh = QPushButton("Muat ulang")
+        self.cloud_refresh.clicked.connect(lambda: self.refresh_cloud(force=True))
+        head.addWidget(self.cloud_target_lbl, 1)
+        head.addWidget(self.cloud_refresh)
+        cv.addLayout(head)
+        self.cloud_scroll = QScrollArea()
+        self.cloud_scroll.setWidgetResizable(True)
+        self.cloud_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        cinner = QWidget()
+        self.cloud_box = QVBoxLayout(cinner)
+        self.cloud_box.setContentsMargins(0, 0, 4, 0)
+        self.cloud_box.setSpacing(10)
+        self.cloud_box.addStretch(1)
+        self.cloud_scroll.setWidget(cinner)
+        cv.addWidget(self.cloud_scroll, 1)
+        self.cloud_msg = QLabel("", objectName="status")
+        self.cloud_msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.cloud_msg.setWordWrap(True)
+        cv.addWidget(self.cloud_msg)
+        self.stack.addWidget(cloud_page)
+        v.addWidget(self.stack, 1)
+        self.tabs.currentChanged.connect(self._tab_changed)
         self.status = QLabel("", objectName="status")
         self.status.setWordWrap(True)
         v.addWidget(self.status)
@@ -870,13 +977,111 @@ class RecordingsWindow(QWidget):
             card.folder_clicked.connect(self.reveal)
             card.delete_clicked.connect(self.delete_recording)
             card.final_clicked.connect(self.make_final)
+            card.upload_clicked.connect(self.upload_recording)
+            card.upload_btn.setVisible(self.uploads is not None)
+            if self.uploads is not None:
+                card.show_upload(self.uploads.get(folder.name))
             self.cards_box.insertWidget(self.cards_box.count() - 1, card)
             self.cards[folder] = card
         self.empty_lbl.setVisible(not recs)
-        self.title_lbl.setText(f"Rekaman ({len(recs)})" if recs else "Rekaman")
+        self._update_title()
         self._loader = ThumbLoader([(f, f / "video.mp4") for f, _ in recs], self.cache_dir)
         self._loader.ready.connect(self._thumb_ready)
         self._loader.start()
+
+    def _update_title(self) -> None:
+        if self.tabs.currentIndex() == 1:
+            n = len(self.cloud_cards)
+            self.title_lbl.setText(f"Rekaman di cloud ({n})" if n else "Rekaman di cloud")
+        else:
+            n = len(self.cards)
+            self.title_lbl.setText(f"Rekaman ({n})" if n else "Rekaman")
+
+    # --- cloud tab ---------------------------------------------------------------------------------
+    def _tab_changed(self, i: int) -> None:
+        self.stack.setCurrentIndex(i)
+        self._update_title()
+        if i == 1:
+            self.refresh_cloud(force=False)
+
+    def _clear_cloud(self) -> None:
+        for c in self.cloud_cards.values():
+            c.setParent(None)
+            c.deleteLater()
+        self.cloud_cards = {}
+
+    def refresh_cloud(self, force: bool = True) -> None:
+        """List the recordings in the chosen cloud destination (in the background). Not repeated when nothing changed."""
+        if self.uploads is None or (self._cloud_job and self._cloud_job.isRunning()):
+            return
+        target = self.uploads.target()
+        key = (target.account, target.folder) if target else None
+        if not force and key == self._cloud_key and not self._cloud_stale:
+            return
+        self._clear_cloud()
+        self._update_title()
+        if target is None:
+            self._cloud_key = None
+            self.cloud_target_lbl.setText("")
+            self.cloud_msg.setText("Belum ada tujuan cloud. Buka ⚙ Pengaturan > Cloud, pilih satu akun (tombol centang).")
+            return
+        exe = cloud.find_rclone()
+        if exe is None:
+            self.cloud_msg.setText("rclone belum terpasang. Pasang di ⚙ Pengaturan > Cloud > Setup rclone.")
+            return
+        self._cloud_key, self._cloud_stale = key, False
+        self.cloud_target_lbl.setText(f"{target.account}:{target.folder or '(level atas)'}")
+        self.cloud_msg.setText("Memuat daftar dari cloud…")
+        self.cloud_refresh.setEnabled(False)
+        self._cloud_job = Job(lambda: list_cloud_recordings(exe, target))
+        self._cloud_job.done.connect(lambda err, k=key: self._cloud_listed(err, k))
+        self._cloud_job.start()
+
+    def _cloud_listed(self, err: str, key) -> None:
+        self.cloud_refresh.setEnabled(True)
+        if key != self._cloud_key:
+            return  # the destination changed while this was loading
+        if err:
+            self._cloud_stale = True
+            self.cloud_msg.setText(f'<span style="color:#ff6b6b">Gagal memuat dari cloud: {err}</span>')
+            return
+        items = self._cloud_job.result or []
+        for info in items:
+            card = CloudCard(info, local=(self.root / info["name"]).exists())
+            card.download_clicked.connect(self.download_recording)
+            card.show_download(self.uploads.get_download(info["name"]))
+            self.cloud_box.insertWidget(self.cloud_box.count() - 1, card)
+            self.cloud_cards[info["name"]] = card
+        self.cloud_msg.setText("" if items else "Belum ada rekaman di tujuan ini. Unggah dari tab Local.")
+        self._update_title()
+
+    def download_recording(self, name: str) -> None:
+        """First click: fetch this recording from the cloud into the recordings folder. While it runs: pause / resume."""
+        if self.uploads is None:
+            return
+        dl = self.uploads.get_download(name)
+        if dl is not None and dl.state in ACTIVE:
+            self.uploads.toggle_pause_download(name)
+            return
+        err = self.uploads.start_download(name, self.root)
+        if err:
+            self.set_status(err, True)
+            self._info(err)
+        else:
+            self.set_status(f"Mengunduh {name} ke {self.root / name}")
+
+    def _download_changed(self, name: str) -> None:
+        card = self.cloud_cards.get(name)
+        dl = self.uploads.get_download(name) if self.uploads else None
+        if card is not None:
+            card.show_download(dl)
+        if dl is not None and dl.state == "done":
+            if card is not None:
+                card.set_local(True)
+            self.set_status(f"{name} terunduh ke {dl.folder}")
+            self.reload()  # the Local tab now has it
+        elif dl is not None and dl.state == "error":
+            self.set_status(f"Unduh {name} gagal: {dl.message}", True)
 
     def _thumb_ready(self, folder: str, img: QImage) -> None:
         card = self.cards.get(Path(folder))
@@ -916,19 +1121,54 @@ class RecordingsWindow(QWidget):
         if not card or Path(folder) in self._builders:
             return
         info = recording_info(folder)
+        up = self.uploads.get(Path(folder).name) if self.uploads else None
+        uploading = up is not None and up.state in ACTIVE
         if not self._confirm("Hapus rekaman?",
                              f"{info['name']}\n{info['text']}\n\nSeluruh isi folder (video, mic, suara sistem, video final) "
-                             "dipindahkan ke Sampah. Masih bisa dikembalikan dari sana.", "Pindahkan ke Sampah"):
+                             "dipindahkan ke Sampah. Masih bisa dikembalikan dari sana."
+                             + ("\n\nRekaman ini sedang diunggah; upload dibatalkan." if uploading else ""), "Pindahkan ke Sampah"):
             return
+        if uploading:
+            self.uploads.cancel(Path(folder).name)
         if self._trash(str(folder)):
             card.setParent(None)
             card.deleteLater()
             del self.cards[Path(folder)]
             self.empty_lbl.setVisible(not self.cards)
-            self.title_lbl.setText(f"Rekaman ({len(self.cards)})" if self.cards else "Rekaman")
+            self._update_title()
             self.set_status(f"{info['name']} dipindahkan ke Sampah")
         else:
             self.set_status("Gagal memindahkan ke Sampah (folder tidak diubah).", True)
+
+    def _info(self, text: str) -> None:
+        QMessageBox.information(self, "Upload", text)
+
+    def upload_recording(self, folder: Path) -> None:
+        """First click: upload this recording folder to the chosen cloud account. While it runs: pause / resume."""
+        if self.uploads is None:
+            return
+        name = Path(folder).name
+        up = self.uploads.get(name)
+        if up is not None and up.state in ACTIVE:
+            self.uploads.toggle_pause(name)
+            return
+        err = self.uploads.start(Path(folder))
+        if err:
+            self.set_status(err, True)
+            self._info(err)
+        else:
+            self.set_status(f"Mengunggah {name} ke {self.uploads.target().remote(name)}")
+
+    def _upload_changed(self, name: str) -> None:
+        card = next((c for f, c in self.cards.items() if f.name == name), None)
+        if card is not None and self.uploads is not None:
+            card.show_upload(self.uploads.get(name))
+            up = self.uploads.get(name)
+            if up is not None and up.state == "error":
+                self.set_status(f"Upload {name} gagal: {up.message}", True)
+            elif up is not None and up.state == "done":
+                self.set_status(f"{name} terunggah ke {up.remote}")
+                self._cloud_stale = True  # the Cloud tab lists it next time it is opened
 
     def make_final(self, folder: Path) -> None:
         folder = Path(folder)
@@ -953,6 +1193,12 @@ class RecordingsWindow(QWidget):
         self.set_status(f"Gagal membuat video final: {err}" if err else f"{folder.name}: video final siap ({Path(path).name})", bool(err))
 
     def closeEvent(self, e) -> None:
+        if self.uploads is not None:
+            try:
+                self.uploads.changed.disconnect(self._upload_changed)  # uploads go on; this window just stops listening
+                self.uploads.download_changed.disconnect(self._download_changed)
+            except (RuntimeError, TypeError):
+                pass
         if self._loader:
             self._loader.stop()
             self._loader.wait(2000)
@@ -966,6 +1212,8 @@ class RecordingsWindow(QWidget):
 
 def run(folder: Path | None = None) -> None:
     app = QApplication.instance() or QApplication(sys.argv)
-    win = PlayerWindow(DEFAULT_OUT, folder) if folder else RecordingsWindow(DEFAULT_OUT)
+    from PySide6.QtCore import QSettings
+
+    win = PlayerWindow(DEFAULT_OUT, folder) if folder else RecordingsWindow(DEFAULT_OUT, uploads=UploadManager(QSettings("meetrec", "meetrec")))
     win.show()
     app.exec()

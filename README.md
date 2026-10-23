@@ -25,6 +25,61 @@ lewat diarization. Di zona overlap antar peserta remote, potongan masing-masing 
 (klip `_overlaps/` menandai zonanya). Pemisahan suara sungguhan (speech separation) belum ada.
 Pakai headphone supaya suara lawan bicara tidak ikut masuk `mic.wav`.
 
+## Pengaturan: General dan Cloud
+
+Tombol ⚙ membuka jendela Pengaturan dengan **menu di kiri** (sidebar) dan halaman di kanan. Menu baru tinggal ditambah dengan `SidebarPages.add_page`.
+
+| Menu | Isi |
+|---|---|
+| **General** | Rekam layar, FPS video, kualitas audio, ekstensi Chrome (kode + port). Disimpan dengan tombol **Simpan**. |
+| **Cloud** | Dua section, langsung berlaku (tidak lewat Simpan): **Setup rclone** dan **Login platform penyimpanan cloud**. |
+
+**Setup rclone.** Menunjukkan apakah [rclone](https://rclone.org) ditemukan (salinan meetrec di `~/.meetrec/bin`, lalu PATH, lalu folder pasang umum) beserta versinya.
+**Pasang rclone** mengunduh build resmi untuk OS dan CPU ini (macOS, Windows, Linux; amd64 dan arm64) dari `downloads.rclone.org`, mencocokkan SHA-256 dengan `SHA256SUMS`,
+dan menaruh programnya di `~/.meetrec/bin` tanpa hak admin. Unduhan yang checksum-nya tidak cocok dibuang.
+
+**Login platform.** Akun tampil sebagai **kartu** (tiga baris teks: nama · platform / status / folder tujuan) dengan tiga tombol persegi: **select** (centang), **folder**, **hapus**.
+Kartu **+** di bawahnya membuka **halaman baru** "Tambah koneksi cloud" (tombol **Kembali**; tombol close jendela dan Esc di halaman itu juga = kembali ke Pengaturan, seperti semua sub halaman). Pilih platform, beri nama, lalu
+- Google Drive, Dropbox, OneDrive, Box, pCloud: **Login** menjalankan `rclone config create`; browser terbuka, kamu mengizinkan akses, token ditulis ke konfigurasi. **Batal login** atau menutup jendela menghentikannya.
+- Amazon S3 (juga Cloudflare R2, Wasabi, Minio) dan Backblaze B2: isi kunci lalu **Simpan akun**. Kunci ditulis langsung ke file konfigurasi, tidak lewat baris perintah.
+
+Tombol di kartu:
+- **select**: menjalankan tes koneksi (daftar folder atas). Kalau lulus, akun ini menjadi **tujuan upload** (kartu berbingkai hijau; hanya satu akun yang bisa terpilih). Kalau gagal, pilihan lama tetap dan galatnya tampil di kartu.
+- **folder**: mengubah folder tujuan di akun itu (default `meetrec`, boleh `Rapat/2026`, kosong = level atas).
+- **hapus**: dengan konfirmasi; izin di sisi penyedia tetap ada sampai kamu mencabutnya di sana.
+
+Pilihan akun dan folder disimpan di pengaturan aplikasi. Mengganti akun tujuan, folder akun tujuan, atau menghapus akun tujuan **saat ada upload berjalan** memunculkan konfirmasi: upload dibatalkan dan progress-nya hilang.
+
+meetrec memakai **file konfigurasi rclone-nya sendiri**, `~/.meetrec/rclone.conf` (hanya bisa dibaca akunmu), jadi akun rclone yang sudah kamu buat di `~/.config/rclone` tidak dibaca dan tidak diubah.
+Platform baru ditambah di daftar `PROVIDERS` (`cloud.py`).
+
+## Daftar rekaman: tab Local dan Cloud
+
+Jendela daftar rekaman punya dua tab (muncul bila aplikasi dibuka dari panel):
+- **Local**: rekaman di komputer ini. Tiap kartu bisa **diunggah** (tombol upload, lihat bawah).
+- **Cloud**: rekaman yang ada di tujuan cloud terpilih (`<akun>:<folder>/`, lihat Pengaturan > Cloud). Daftar dimuat di latar dari `rclone lsjson`; hanya folder rekaman yang tampil
+  (berkas lepas dan nama tidak aman dilewati). Kartu menunjukkan ukuran, jumlah berkas, tanggal, dan "sudah ada di komputer" bila folder lokalnya ada.
+  Tombol **unduh** menyalin folder itu ke folder rekaman lokal (`rclone copy`: berkas yang sama persis dilewati), dengan cincin progres dan jeda/lanjut yang sama seperti upload.
+  Setelah selesai, rekaman muncul di tab Local. Daftar cloud tidak dimuat ulang tiap pindah tab; ia dimuat ulang oleh **Muat ulang**, saat tujuan berubah, dan setelah ada upload selesai.
+
+Unduhan tidak ikut dibatalkan saat tujuan diganti (prosesnya sudah terikat ke akun asalnya); menutup aplikasi saat ada upload atau unduhan meminta konfirmasi.
+
+## Upload rekaman ke cloud
+
+Di daftar rekaman, tiap kartu punya tombol keempat: **upload** (ikon panah ke atas), setelah folder, hapus, dan video final. Satu klik mengunggah **seluruh folder rekaman** ke
+`<akun>:<folder>/<nama rekaman>/` pada tujuan yang dipilih di Pengaturan > Cloud (`rclone copy`: berkas yang sama persis dilewati, jadi mengunggah ulang aman).
+
+| Keadaan tombol | Tampilan | Klik |
+|---|---|---|
+| belum | ikon upload | mulai upload (tanpa tujuan terpilih: muncul penjelasan di mana memilihnya) |
+| mengunggah | cincin biru berisi progres, ikon jeda | jeda |
+| dijeda | cincin kuning, ikon putar | lanjut |
+| selesai | hijau, centang | unggah ulang |
+| gagal | merah, alasannya di tooltip | coba lagi |
+
+Jeda = proses rclone dibekukan (`SIGSTOP` di macOS/Linux, `NtSuspendProcess` di Windows) lalu dilanjutkan. Upload berjalan terus saat jendela daftar ditutup dan dibuka lagi;
+menutup aplikasi saat ada upload meminta konfirmasi, dan upload dibatalkan. Menghapus rekaman yang sedang diunggah membatalkan upload-nya.
+
 ## Siapa bicara apa (di player)
 
 Buka rekaman di player. Di bawah video ada bagian **Pembicara**:

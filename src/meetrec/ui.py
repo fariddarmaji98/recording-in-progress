@@ -24,12 +24,14 @@ from PySide6.QtCore import QPointF, QRectF, QSettings, QSize, Qt, QThread, QTime
 from PySide6.QtGui import (QColor, QDesktopServices, QFont, QGuiApplication, QIcon, QImage, QPainter,
                            QPainterPath, QPen, QPixmap, QPolygonF)
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QFrame, QHBoxLayout,
-                               QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QSlider, QVBoxLayout, QWidget)
+                               QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QSlider, QVBoxLayout, QWidget)
 
 from .meetbridge import DEFAULT_PORT, MeetBridge
 from .paths import DEFAULT_OUT
 from .widgets import BUTTON_STYLE, FG, IconButton, make_icon
 from .screen import ScreenRecorder, screen_permission
+from .settings import AUDIO_RATES, VIDEO_FPS, SettingsDialog  # noqa: F401  (re-exported: ui.SettingsDialog)
+from .upload import UploadManager
 from .windows import WindowInfo, list_windows
 from .winutil import exclude_from_capture, set_close_enabled
 
@@ -275,68 +277,6 @@ class LevelLine(QWidget):
                 p.drawLine(x, int(mid - a), x, int(mid + a))
 
 
-AUDIO_RATES = [(16000, "16 kHz: hemat tempat, cukup untuk suara"), (24000, "24 kHz"), (48000, "48 kHz: kualitas tertinggi")]
-VIDEO_FPS = [4, 8, 15, 30]
-
-
-class SettingsDialog(QDialog):
-    """Recording options. They are stored in QSettings and read when a recording starts."""
-
-    def __init__(self, settings: QSettings, parent=None, token: str = "", port: int = DEFAULT_PORT):
-        super().__init__(parent)
-        self.setWindowTitle("Pengaturan")
-        self.setModal(True)
-        self.setMinimumWidth(360)
-        form = QFormLayout()
-        self.video = QCheckBox("Rekam layar (video.mp4)")
-        self.video.setChecked(settings.value("record_video", True, type=bool))
-        self.fps = QComboBox()
-        for f in VIDEO_FPS:
-            self.fps.addItem(f"{f} fps", f)
-        self.fps.setCurrentIndex(max(0, self.fps.findData(settings.value("video_fps", 8, type=int))))
-        self.rate = QComboBox()
-        for r, label in AUDIO_RATES:
-            self.rate.addItem(label, r)
-        self.rate.setCurrentIndex(max(0, self.rate.findData(settings.value("audio_rate", 16000, type=int))))
-        form.addRow(self.video)
-        form.addRow("FPS video", self.fps)
-        form.addRow("Kualitas audio", self.rate)
-        self.bridge = QCheckBox("Terima data dari ekstensi Chrome (siapa bicara di Meet)")
-        self.bridge.setChecked(settings.value("bridge_enabled", True, type=bool))
-        form.addRow(self.bridge)
-        self.token = QLineEdit(token)
-        self.token.setReadOnly(True)
-        copy = QPushButton("Salin")
-        copy.clicked.connect(lambda: QApplication.clipboard().setText(self.token.text()))
-        row = QHBoxLayout()
-        row.addWidget(self.token, 1)
-        row.addWidget(copy)
-        form.addRow("Kode ekstensi Chrome", row)
-        hint = QLabel(f"Tempel kode ini di Opsi ekstensi. Aplikasi mendengarkan di 127.0.0.1:{port} (hanya komputer ini).", objectName="status")
-        hint.setWordWrap(True)
-        form.addRow(hint)
-        buttons = QHBoxLayout()
-        buttons.addStretch(1)
-        cancel = QPushButton("Batal")
-        cancel.clicked.connect(self.reject)
-        self.save = QPushButton("Simpan")
-        self.save.setDefault(True)
-        self.save.clicked.connect(self.accept)
-        buttons.addWidget(cancel)
-        buttons.addWidget(self.save)
-        v = QVBoxLayout(self)
-        v.addLayout(form)
-        v.addLayout(buttons)
-        self.video.toggled.connect(self.fps.setEnabled)
-        self.fps.setEnabled(self.video.isChecked())
-
-    def store(self, settings: QSettings) -> None:
-        settings.setValue("record_video", self.video.isChecked())
-        settings.setValue("video_fps", self.fps.currentData())
-        settings.setValue("audio_rate", self.rate.currentData())
-        settings.setValue("bridge_enabled", self.bridge.isChecked())
-
-
 class _Starter(QThread):
     """Opens the devices off the UI thread (CoreAudio can take seconds), then reports ok or an error."""
 
@@ -419,6 +359,7 @@ class Panel(QWidget):
         self.setWindowTitle("meetrec")
         self.setStyleSheet(STYLE + BUTTON_STYLE)
         self.settings = QSettings("meetrec", "meetrec")
+        self.uploads = UploadManager(self.settings)  # uploads outlive the windows that start them
         self.out_dir = Path(self.settings.value("out_dir", str(DEFAULT_OUT)))
         self.state = "idle"  # idle | starting | recording | paused
         self._choosing = False  # the 'what to record' picker is open
@@ -989,7 +930,7 @@ class Panel(QWidget):
     def open_settings(self) -> None:
         if self.state != "idle":
             return
-        dlg = SettingsDialog(self.settings, self, token=self.bridge.token, port=self.bridge.port)
+        dlg = SettingsDialog(self.settings, self, token=self.bridge.token, port=self.bridge.port, uploads=self.uploads)
         if dlg.exec():
             dlg.store(self.settings)
             if self.settings.value("bridge_enabled", True, type=bool):
@@ -1005,7 +946,7 @@ class Panel(QWidget):
             self._player.raise_()
             self._player.activateWindow()
             return
-        self._player = RecordingsWindow(self.out_dir)
+        self._player = RecordingsWindow(self.out_dir, uploads=self.uploads)
         self._player.closed.connect(self._player_closed)
         # The player is a sub page. This panel is always on top, so it would cover the player:
         # hide it while the player is open and bring it back when the player closes.
@@ -1032,6 +973,7 @@ class Panel(QWidget):
             self._close_overlay()
         if self.state != "idle":
             self.stop()
+        self.uploads.cancel_everything()
         self.bridge.stop()
 
     # --- window ----------------------------------------------------------------------------------
@@ -1055,6 +997,14 @@ class Panel(QWidget):
     def mouseReleaseEvent(self, _):
         self._drag_off = None
 
+    def confirm_quit_with_uploads(self, n: int) -> bool:
+        box = QMessageBox(QMessageBox.Icon.Warning, "Keluar?", f"Sedang mengunggah/mengunduh {n} rekaman. Kalau aplikasi ditutup, prosesnya dibatalkan dan "
+                          "progress-nya hilang.", QMessageBox.StandardButton.NoButton, self)
+        yes = box.addButton("Tutup aplikasi", QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton("Lanjutkan", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        return box.clickedButton() is yes
+
     def closeEvent(self, e):
         if self.state != "idle":  # recording, paused or still starting
             e.ignore()  # no closing while recording
@@ -1063,6 +1013,10 @@ class Panel(QWidget):
         if self._choosing:  # a sub page: close = back to the page before it, never quit
             e.ignore()
             self.cancel_pick()
+            return
+        active = self.uploads.busy()
+        if active and not self.confirm_quit_with_uploads(len(active)):
+            e.ignore()
             return
         super().closeEvent(e)
         QApplication.quit()  # only on the main page does close end the app
