@@ -52,9 +52,16 @@ def interleave(*tracks: list[Turn]) -> list[Turn]:
 
 
 def fmt_time(sec: float) -> str:
-    s = int(sec)
-    return f"{s // 3600:02d}:{s % 3600 // 60:02d}:{s % 60:02d}"
+    """Menit.detik — bentuk yang dipakai transkrip ("00.01")."""
+    s = max(0, int(sec))
+    return f"{s // 60:02d}.{s % 60:02d}"
 
 
 def to_markdown(turns: list[Turn]) -> str:
-    return "\n".join(f"[{fmt_time(t.start)}] {t.speaker}{' (overlap)' if t.overlap else ''}: {t.text}" for t in turns) + "\n"
+    """Satu baris per giliran: `<menit.detik>: teks`.
+
+    Nama pembicara sengaja tidak ditulis di sini — dua orang yang bicara
+    bersamaan muncul sebagai dua baris dengan menit yang sama, jadi urutannya
+    terbaca dari waktu, bukan dari label. Nama tetap ada di transcript.json.
+    """
+    return "\n".join(f"{fmt_time(t.start)}: {t.text}" for t in turns) + "\n"

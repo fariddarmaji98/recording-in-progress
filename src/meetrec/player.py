@@ -214,6 +214,7 @@ class PlayerWindow(QWidget):
         self._builder: _Builder | None = None
         self._seeking = False
         self._job: Job | None = None
+        self._tw = None  # jendela progres transkrip (hidup sendiri, player tetap terbuka)
         self._ok_text = ""
         self._closed = False
         self.t_start = 0.0        # recording-timeline second that is second 0 of the player
@@ -550,11 +551,26 @@ class PlayerWindow(QWidget):
                       "Analisis pembicara selesai. Klik dua kali nama di kiri untuk memberi nama.")
 
     def transcribe(self) -> None:
-        from .transcript import build_transcript
+        """Buka jendela progres tersendiri — player tetap terbuka dan bisa diputar."""
+        from .transcriptwin import TranskripWindow
 
-        folder, code = self.folder, LANGUAGES[self.lang.currentIndex()][1]
-        self._run_job(lambda: build_transcript(folder, code), "Membuat transkrip… (pertama kali mengunduh model ±480 MB; bisa beberapa menit)",
-                      "Transkrip selesai. Klik satu baris untuk loncat ke menit itu.")
+        if not self.folder or (self._tw and self._tw.job.isRunning()):
+            return
+        self._tw = TranskripWindow(self.folder, LANGUAGES[self.lang.currentIndex()][1])
+        self._tw.done.connect(self._transcript_done)
+        self._who_buttons_busy()
+        self._tw.show()
+        self._tw.raise_()
+
+    def _transcript_done(self, err: str) -> None:
+        if self._closed:
+            return
+        self._who_buttons()
+        if err:
+            self.set_status(f"Gagal: {err}", True)
+            return
+        self.load_who()
+        self.set_status("Transkrip selesai. Klik satu baris untuk loncat ke menit itu.")
 
     # --- audio tracks ------------------------------------------------------------------------------
     def _fill_tracks(self) -> None:

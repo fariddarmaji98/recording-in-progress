@@ -19,25 +19,51 @@ from pathlib import Path
 from .asr import Word
 
 DEFAULT_BASE = os.environ.get("MEETREC_TRANSKRIP_URL", "http://127.0.0.1:8000/api")
+POLL_S = 0.5  # cukup rapat untuk terasa "langsung", cukup jarang untuk tidak membebani server
 
 
 def transcribe(wav: str | Path, language: str | None = "id", model: str | None = None,
-               base: str | None = None, timeout: float = 3600.0) -> list[Word]:
-    """`model` diabaikan (repo yang memilih model ASR-nya)."""
+               base: str | None = None, timeout: float = 3600.0, on_event=None) -> list[Word]:
+    """Unggah → minta transkrip → ikuti log server → ambil segmen. `model` diabaikan.
+
+    `on_event({"text", "pct"})` dipanggil setiap ada langkah baru: baris dari server
+    (lewat `GET /recordings/{id}/progress`) dan langkah yang terjadi di sisi ini
+    (mengunggah, meminta transkrip). Dipakai jendela progres, jadi bentuknya sama
+    untuk semua sumber.
+    """
+    def say(text: str, pct: int | None = None) -> None:
+        if on_event:
+            on_event({"text": text, "pct": pct})
+
     base = (base or DEFAULT_BASE).rstrip("/")
-    up = _upload(f"{base}/recordings", Path(wav), language or "auto")
-    job = up["job_id"]
+    path = Path(wav)
+    say(f"mengunggah {path.name} ({path.stat().st_size / 1e6:.1f} MB)", 2)
+    up = _upload(f"{base}/recordings", path, language or "auto")
+    rid = up["recording"]["id"]
+    say(f"server menerima sebagai rekaman #{rid}", 4)
+    _post(f"{base}/recordings/{rid}/transcribe")
+    say("menjalankan transkrip di server", 5)
+
+    seq = 0
     deadline = time.monotonic() + timeout
     while True:
-        j = _get(f"{base}/jobs/{job}")
-        if j["status"] == "done":
+        d = _get(f"{base}/recordings/{rid}/progress?since={seq}")
+        for e in d.get("events") or []:
+            seq = e["seq"] + 1
+            say(e["text"], e.get("pct"))
+        status = d.get("status")
+        if status == "done":
             break
-        if j["status"] == "failed":
-            raise RuntimeError(f"transkrip gagal di repo transkrip: {j.get('error') or 'tanpa pesan'}")
+        if status == "failed":
+            raise RuntimeError(f"transkrip gagal di repo transkrip: {d.get('error') or 'tanpa pesan'}")
+        if status == "paused":
+            raise RuntimeError("transkrip dijeda di server — lanjutkan dari halaman transkrip, lalu coba lagi")
         if time.monotonic() > deadline:
-            raise TimeoutError(f"job {job} belum selesai setelah {timeout:.0f} detik")
-        time.sleep(2.0)
-    segs = _get(f"{base}/recordings/{up['recording']['id']}")["segments"]
+            raise TimeoutError(f"rekaman #{rid} belum selesai setelah {timeout:.0f} detik")
+        time.sleep(POLL_S)
+
+    segs = _get(f"{base}/recordings/{rid}")["segments"]
+    say(f"{len(segs)} segmen diterima dari server", 100)
     return [Word(s["text"].strip(), s["start_ms"] / 1000, s["end_ms"] / 1000) for s in segs if s["text"].strip()]
 
 
@@ -60,6 +86,11 @@ def _upload(url: str, path: Path, language: str) -> dict:
 
 def _get(url: str) -> dict:
     return _json(urllib.request.Request(url))
+
+
+def _post(url: str) -> dict:
+    """POST tanpa body (server hanya butuh id di path)."""
+    return _json(urllib.request.Request(url, data=b"", method="POST"))
 
 
 def _json(req: urllib.request.Request) -> dict:
@@ -95,9 +126,12 @@ def pick_transcriber(base: str | None = None):
     from . import asr
 
     if reachable(base):
-        return lambda wav, language="id", model="small": transcribe(wav, language, base=base)
+        return lambda wav, language="id", model="small", on_event=None: transcribe(
+            wav, language, base=base, on_event=on_event)
 
-    def local(wav, language="id", model="small"):
+    def local(wav, language="id", model="small", on_event=None):
+        if on_event:
+            on_event({"text": "backend transkrip tidak jalan — memakai faster-whisper lokal", "pct": None})
         try:
             return asr.transcribe(wav, language, model)
         except ImportError:
