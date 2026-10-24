@@ -47,6 +47,39 @@ def timeline_start(folder: Path) -> float:
     return min([float((meta.get("video") or {}).get("offset_sec") or 0.0)] + starts)
 
 
+def build_mix_wav(folder: Path, out_name: str = "mix.wav") -> Path:
+    """mic + system -> satu wav, untuk rekaman tanpa video (jalur unggah transkrip).
+
+    Sama seperti `full.mp4` tetapi tanpa gambar: tiap track ditunda sesuai
+    offset-nya, lalu dicampur. Dihasilkan ulang tiap kali dipanggil — berkas
+    turunan, bukan arsip.
+    ponytail: tanpa cek basi; kalau nanti transkrip sering diulang di folder
+    tanpa video, tambahkan perbandingan mtime seperti `is_up_to_date`.
+    """
+    folder = Path(folder)
+    meta_file = folder / "meta.json"
+    meta = json.loads(meta_file.read_text()) if meta_file.exists() else {}
+    tracks = meta.get("tracks", {})
+    audio = [(folder / f"{name}.wav", float(tracks.get(name, {}).get("offset_sec") or 0.0))
+             for name in ("mic", "system") if (folder / f"{name}.wav").exists()]
+    if not audio:
+        raise FileNotFoundError("tidak ada mic.wav / system.wav untuk dicampur")
+    t_start = timeline_start(folder)
+    cmd = [ffmpeg_exe(), "-y", "-loglevel", "error"]
+    for path, _ in audio:
+        cmd += ["-i", str(path)]
+    chains = [f"[{i}:a]adelay={max(0, round((off - t_start) * 1000))}:all=1[a{i}]"
+              for i, (_, off) in enumerate(audio)]
+    chains.append("".join(f"[a{i}]" for i in range(len(audio)))
+                  + f"amix=inputs={len(audio)}:normalize=0:duration=longest[mix]")
+    out = folder / out_name
+    cmd += ["-filter_complex", ";".join(chains), "-map", "[mix]", "-ac", "1", str(out)]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"ffmpeg gagal: {r.stderr.strip()[-400:]}")
+    return out
+
+
 def build_full_media(folder: Path, out_name: str = "full.mp4") -> Path:
     folder = Path(folder)
     meta_file = folder / "meta.json"

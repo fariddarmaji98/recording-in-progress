@@ -14,43 +14,54 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Callable
 
-from .merge import Turn, build_turns, interleave, to_markdown
+from .merge import Turn, build_turns, to_markdown
 from .remoteasr import pick_transcriber
-from .speakerdata import DEFAULT_THRESHOLD, track_offsets
+from .speakerdata import DEFAULT_THRESHOLD
 
 
 def transcript_turns(folder: Path, transcribe: Callable, language: str | None = "id", model: str = "small",
                      on_event: Callable | None = None) -> list[Turn]:
-    """`transcribe(wav, language, model, on_event=...)` -> list of Word (track time). Injected so tests need no model.
+    """`transcribe(path, language, model, on_event=...)` -> list of Word (recording timeline).
 
-    Tanpa diarization: setiap track langsung jadi teks. `mic.wav` = "Me",
-    `system.wav` = "Remote". Kalau dua track bicara di saat yang sama, keduanya
-    muncul sebagai dua giliran dengan waktu yang sama — tidak ada yang ditebak
-    atau dibuang.
+    **Satu media, satu rekaman di server.** Video + mic + system digabung dulu
+    (`full.mp4`; tanpa video -> `mix.wav`), lalu berkas gabungan itu yang
+    diunggah. Jadi arsip transkrip berisi satu entri yang punya video sekaligus
+    transkripnya, bukan dua entri setengah-setengah.
 
-    `on_event({"text", "pct"})` menerima langkah tiap track; persentasenya
-    diskalakan ke seluruh pekerjaan (dua track = masing-masing separuh), jadi
-    jendela progres tidak melompat balik ke 0 saat pindah dari mic ke system.
+    Waktu dari media gabungan dimulai di `timeline_start` folder, jadi kata
+    digeser ke timeline rekaman supaya cocok dengan `speakers.json` dan player.
     """
     folder = Path(folder)
-    off = track_offsets(folder)
-    lists: list[list[Turn]] = []
-    mic, system = folder / "mic.wav", folder / "system.wav"
-    tracks = [(name, path, who) for name, path, who in
-              (("mic", mic, "Me"), ("system", system, "Remote")) if path.exists()]
-    if not tracks:
-        raise FileNotFoundError("tidak ada mic.wav atau system.wav di folder rekaman ini")
-    for i, (name, path, who) in enumerate(tracks):
-        def relay(ev: dict, i=i, name=name) -> None:
-            if on_event is None:
-                return
-            pct = ev.get("pct")
-            on_event({"text": f"{name}: {ev['text']}",
-                      "pct": None if pct is None else int((i * 100 + pct) / len(tracks))})
+    media, t_start = _media_to_upload(folder, on_event)
+    relay = None
+    if on_event is not None:
+        def relay(ev: dict) -> None:
+            on_event({"text": f"{media.name}: {ev['text']}", "pct": ev.get("pct")})
 
-        words = _shift(transcribe(path, language, model, on_event=relay), off.get(name, 0.0))
-        lists.append(build_turns(words, None, fixed=who))
-    return interleave(*lists)
+    words = _shift(transcribe(media, language, model, on_event=relay), t_start)
+    if getattr(transcribe, "segment_level", False):
+        # server sudah memotong per kalimat: satu segmen = satu baris, jangan digabung lagi
+        return [Turn("Mix", w.start, w.end, w.text) for w in words]
+    return build_turns(words, None, fixed="Mix")
+
+
+def _media_to_upload(folder: Path, on_event: Callable | None) -> tuple[Path, float]:
+    """Berkas gabungan yang diunggah + detik awal timeline-nya."""
+    from .fullmedia import build_full_media, build_mix_wav, is_up_to_date, timeline_start
+
+    def say(text: str) -> None:
+        if on_event:
+            on_event({"text": text, "pct": 1})
+
+    t_start = timeline_start(folder)
+    if is_up_to_date(folder):
+        say("memakai full.mp4 yang sudah ada (video + suara tergabung)")
+        return folder / "full.mp4", t_start
+    if (folder / "video.mp4").exists():
+        say("menggabungkan video + mic + system jadi satu mp4")
+        return build_full_media(folder), t_start
+    say("menggabungkan mic + system jadi satu wav (rekaman tanpa video)")
+    return build_mix_wav(folder), t_start
 
 
 def _shift(words: list, by: float) -> list:

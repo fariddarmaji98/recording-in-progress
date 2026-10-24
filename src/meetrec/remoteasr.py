@@ -69,11 +69,12 @@ def transcribe(wav: str | Path, language: str | None = "id", model: str | None =
 
 def _multipart(path: Path, fields: dict[str, str]) -> tuple[bytes, str]:
     boundary = uuid.uuid4().hex
+    ctype = "video/mp4" if path.suffix.lower() in (".mp4", ".mov", ".m4v", ".mkv", ".webm") else "audio/wav"
     out = bytearray()
     for k, v in fields.items():
         out += f"--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n".encode()
     out += (f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{path.name}\"\r\n"
-            "Content-Type: audio/wav\r\n\r\n").encode()
+            f"Content-Type: {ctype}\r\n\r\n").encode()
     out += path.read_bytes() + f"\r\n--{boundary}--\r\n".encode()
     return bytes(out), f"multipart/form-data; boundary={boundary}"
 
@@ -126,8 +127,10 @@ def pick_transcriber(base: str | None = None):
     from . import asr
 
     if reachable(base):
-        return lambda wav, language="id", model="small", on_event=None: transcribe(
-            wav, language, base=base, on_event=on_event)
+        def remote(path, language="id", model="small", on_event=None):
+            return transcribe(path, language, base=base, on_event=on_event)
+        remote.segment_level = True  # satu Word = satu kalimat dari server
+        return remote
 
     def local(wav, language="id", model="small", on_event=None):
         if on_event:
@@ -137,5 +140,6 @@ def pick_transcriber(base: str | None = None):
         except ImportError:
             raise SystemExit(f"repo transkrip tidak jalan di {base or DEFAULT_BASE} dan faster-whisper "
                              "tidak terpasang: jalankan backend ultraman-transkrip") from None
+    local.segment_level = False  # word-level: perlu digabung jadi giliran
     return local
 
