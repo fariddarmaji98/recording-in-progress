@@ -284,13 +284,16 @@ def safe_name(name: str) -> bool:
     return bool(_SAFE.fullmatch(name)) and ".." not in name
 
 
-def list_cloud_recordings(exe: Path, target: Target, timeout: int = 120) -> list[dict]:
+def list_cloud_recordings(exe: Path, target: Target, timeout: int = 240) -> list[dict]:
     """Recording folders found in <account>:<folder>: [{name, size, files, modified}], newest name first.
     A missing cloud folder is an empty list (nothing uploaded yet); anything else wrong raises RuntimeError."""
     remote = f"{target.account}:{target.folder}"
     try:
-        r = subprocess.run([str(exe), "--config", str(cloud.CONFIG), "lsjson", remote, "--recursive", "--files-only", "--retries", "1",
-                            "--low-level-retries", "2", "--contimeout", "15s", "--timeout", "30s"],
+        # rclone's own default retries only: a recursive walk of a Drive folder regularly answers
+        # `rateLimitExceeded`, which rclone retries with the pacer's exponential backoff. Forcing
+        # --retries 1 / --low-level-retries 2 turned one throttled response into a hard failure.
+        r = subprocess.run([str(exe), "--config", str(cloud.CONFIG), "lsjson", remote, "--recursive", "--files-only",
+                            "--contimeout", "15s", "--timeout", "30s"],
                            capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL, **cloud._NO_WINDOW)
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"Tidak ada jawaban dari cloud dalam {timeout} detik")

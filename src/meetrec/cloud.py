@@ -15,6 +15,7 @@ import shutil
 import ssl
 import subprocess
 import sys
+import time
 import urllib.request
 import zipfile
 from dataclasses import dataclass
@@ -298,15 +299,43 @@ class OAuthLogin:
             self._proc.terminate()
 
 
-def test_remote(exe: Path, name: str, timeout: int = 60) -> str:
-    """List the top level of the account. Returns a short success text; raises RuntimeError with rclone's own message."""
+def test_remote(exe: Path, name: str, timeout: int = 180) -> str:
+    """List the top level of the account. Returns a short success text; raises RuntimeError with rclone's own message.
+
+    The text reports how many retries it took, because a Drive that is throttling still "works" — the
+    difference between 1 attempt and 9 is the difference between a healthy account and a rate-limited one.
+    """
+    started = time.monotonic()
     try:
-        r = subprocess.run([str(exe), "--config", str(CONFIG), "lsd", f"{name}:", "--max-depth", "1", "--retries", "1",
-                            "--low-level-retries", "1", "--contimeout", "15s", "--timeout", "30s"],
+        # default low-level retries (10): Drive throttles even an `lsd`, and rclone backs off properly.
+        # -v is needed only so the pacer's "low level retry N/10" lines reach stderr and can be counted.
+        r = subprocess.run([str(exe), "--config", str(CONFIG), "lsd", f"{name}:", "--max-depth", "1",
+                            "--contimeout", "15s", "--timeout", "30s", "-v"],
                            capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL, **_NO_WINDOW)
     except subprocess.TimeoutExpired:
         raise RuntimeError("Tidak ada jawaban dalam %d detik" % timeout)
+    took = time.monotonic() - started
+    tries = _retries(r.stderr or "")
     if r.returncode != 0:
-        raise RuntimeError(_tail(r.stderr or r.stdout))
+        raise RuntimeError(f"{_tail(r.stderr or r.stdout)} (setelah {_tries_text(tries)}, {took:.1f} detik)")
     n = len([ln for ln in r.stdout.splitlines() if ln.strip()])
-    return f"Tersambung ({n} folder/bucket di level atas)"
+    return f"Tersambung ({n} folder/bucket di level atas, {_tries_text(tries)}, {took:.1f} detik)"
+
+
+_RETRY_LINE = re.compile(r"low level retry (\d+)/\d+")
+_OP_RETRY_LINE = re.compile(r"with (\d+) errors:")
+
+
+def _retries(log: str) -> int:
+    """How many retries rclone logged (0 = first try worked).
+
+    `low level retry N/M` is the pacer backing off one request (what a throttled Drive produces);
+    `with N errors:` is a whole-operation retry. Both counted, whichever is bigger.
+    """
+    low = max((int(m.group(1)) for m in _RETRY_LINE.finditer(log)), default=0)
+    op = max((int(m.group(1)) for m in _OP_RETRY_LINE.finditer(log)), default=0)
+    return max(low, op)
+
+
+def _tries_text(n: int) -> str:
+    return "tanpa coba ulang" if n == 0 else f"{n} kali coba ulang"
