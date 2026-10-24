@@ -132,6 +132,7 @@ class IconButton(QPushButton):
 
 BUTTON_STYLE = f"""
 QPushButton[square="true"] {{ padding: 0; }}
+QPushButton[square="true"]:disabled {{ background: #232836; }}
 QPushButton[tone="primary"] {{ background: #2ea043; }}
 QPushButton[tone="primary"]:hover {{ background: #3bb653; }}
 QPushButton[tone="primary"]:disabled {{ background: #1f5a2c; }}

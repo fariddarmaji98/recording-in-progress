@@ -839,11 +839,18 @@ class CloudCard(QFrame):
 
     def set_local(self, local: bool) -> None:
         i = self.info
+        self._local = local
         text = " | ".join([fmt_size(i["size"]), f"{i['files']} file"] + ([i["modified"][:10]] if i["modified"] else []))
         self.meta_lbl.setText(text + ("  ·  sudah ada di komputer" if local else ""))
+        b = self.download_btn
+        b.setEnabled(not local)  # already here: nothing to download, so the button must not look clickable
+        if local:
+            b.set_state("done", 1.0, "Sudah ada di komputer ini")
 
     def show_download(self, dl: Upload | None) -> None:
         b = self.download_btn
+        if self._local:
+            return b.set_state("done", 1.0, "Sudah ada di komputer ini")
         if dl is None or dl.state == "cancelled":
             return b.set_state("idle")
         pct = int(dl.progress * 100)
