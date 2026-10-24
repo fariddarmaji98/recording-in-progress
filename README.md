@@ -18,14 +18,14 @@ potong per pembicara per section, generate full media, video player.
 | Daftar rekaman + player | Tombol daftar di panel (atau `meetrec player`) membuka jendela sempit berisi **kartu** yang bisa digulir. Kartu: gambar dengan ikon play, nama, ukuran \| durasi \| tipe, tombol **folder**, **hapus** (dipindah ke Sampah, dengan konfirmasi), dan **buat video final**. Klik kartu membuka player (`full.mp4`): pilih track audio **Mix / Mic (Me) / System (Remote)**, kecepatan 0.5×–2×, seek, spasi = putar/jeda, ←/→ = ±5 detik. Panel utama disembunyikan selama daftar atau player terbuka, dan muncul lagi saat ditutup. Gambar kartu di-cache di `~/.meetrec/thumbs` (bukan di folder rekaman). |
 | Timeline `speakers.json` | `sherpa-onnx` (pyannote segmentation-3.0). Segmen pembicara berbeda boleh tumpang tindih; zona overlap dicatat. |
 | Potong per orang `sections/` | Satu wav per pembicara per section + satu klip campuran per zona overlap. |
-| Transkrip per pembicara `transcript.json` / `.md` | Opsional (`pip install -e ".[transcribe]"`, faster-whisper). Tiap baris: waktu, **siapa**, teks. Kata dari `mic.wav` = "Me"; kata dari `system.wav` = pembicara yang aktif saat itu di `speakers.json`; kata di zona overlap ditandai dua nama dan tidak ditebak. Waktu kedua track diselaraskan lewat `meta.json`. |
+| Transkrip per pembicara `transcript.json` / `.md` | ASR-nya milik repo `ultraman-transkrip` lewat HTTP (`MEETREC_TRANSKRIP_URL`, default `http://127.0.0.1:8000/api`); faster-whisper lokal hanya cadangan saat backend itu mati dan paket opsionalnya terpasang. Tiap baris: waktu, **siapa**, teks. Kata dari `mic.wav` = "Me"; kata dari `system.wav` = pembicara yang aktif saat itu di `speakers.json`; kata di zona overlap ditandai dua nama dan tidak ditebak. Waktu kedua track diselaraskan lewat `meta.json`. |
 
 Semua orang di Meet/Zoom datang ke perangkatmu sebagai **satu aliran suara**, jadi pemisahan antar peserta remote hanya
 lewat diarization. Di zona overlap antar peserta remote, potongan masing-masing orang masih berisi dua suara
 (klip `_overlaps/` menandai zonanya). Pemisahan suara sungguhan (speech separation) belum ada.
 Pakai headphone supaya suara lawan bicara tidak ikut masuk `mic.wav`.
 
-## Pengaturan: General dan Cloud
+## Pengaturan: General, Cloud, dan MCP
 
 Tombol ⚙ membuka jendela Pengaturan dengan **menu di kiri** (sidebar) dan halaman di kanan. Menu baru tinggal ditambah dengan `SidebarPages.add_page`.
 
@@ -33,6 +33,13 @@ Tombol ⚙ membuka jendela Pengaturan dengan **menu di kiri** (sidebar) dan hala
 |---|---|
 | **General** | Rekam layar, FPS video, kualitas audio, ekstensi Chrome (kode + port). Disimpan dengan tombol **Simpan**. |
 | **Cloud** | Dua section, langsung berlaku (tidak lewat Simpan): **Setup rclone** dan **Login platform penyimpanan cloud**. |
+| **MCP** | Daftar server MCP yang bisa disambungkan beserta **URL** dan **Key** per server, dengan tombol sambung / putus / restart. |
+
+**Server MCP.** Halaman MCP menyambungkan meetrec ke server MCP milik project lain (sekarang satu: `ultraman-transkrip` di `http://127.0.0.1:8100/mcp`). meetrec **hanya menyambung** — servernya dijalankan project pemiliknya sendiri, tombol Sambung tidak menyalakannya.
+
+- **URL** dan **Key** diisi per kartu. **Key opsional**: untuk MCP publik yang tidak memakai autentikasi, biarkan kosong dan tidak ada header `Authorization` yang dikirim; bila diisi, dikirim sebagai `Authorization: Bearer <key>`. Keduanya disimpan di setelan aplikasi (QSettings) saat kolom selesai diedit atau saat tombol ditekan — **bukan** di `~/.meetrec/mcp`, karena folder itu cache koneksi yang dihapus tombol Restart.
+- Tombol mengikuti keadaan: belum tersambung → **Sambung**; tersambung → **Putus** + **Restart** (ikon). Restart = putus, hapus cache koneksi, lalu sambung ulang; data rekaman tidak pernah disentuh.
+- Pesan status memakai bahasa manusia: server mati → "server MCP tidak bisa dihubungi di `<url>` — jalankan dulu servernya, lalu coba lagi"; berhasil → "Tersambung ke `<nama>` — N tool tersedia."
 
 **Setup rclone.** Menunjukkan apakah [rclone](https://rclone.org) ditemukan (salinan meetrec di `~/.meetrec/bin`, lalu PATH, lalu folder pasang umum) beserta versinya.
 **Pasang rclone** mengunduh build resmi untuk OS dan CPU ini (macOS, Windows, Linux; amd64 dan arm64) dari `downloads.rclone.org`, mencocokkan SHA-256 dengan `SHA256SUMS`,
@@ -45,6 +52,7 @@ Kartu **+** di bawahnya membuka **halaman baru** "Tambah koneksi cloud" (tombol 
 
 Tombol di kartu:
 - **select**: menjalankan tes koneksi (daftar folder atas). Kalau lulus, akun ini menjadi **tujuan upload** (kartu berbingkai hijau; hanya satu akun yang bisa terpilih). Kalau gagal, pilihan lama tetap dan galatnya tampil di kartu.
+  Hasil yang lulus menyebut jumlah folder yang terbaca **dan berapa kali rclone harus mencoba ulang** ("tanpa coba ulang, 3.9 detik"), supaya koneksi yang lambat bisa dibedakan dari koneksi yang sehat.
 - **folder**: mengubah folder tujuan di akun itu (default `meetrec`, boleh `Rapat/2026`, kosong = level atas).
 - **hapus**: dengan konfirmasi; izin di sisi penyedia tetap ada sampai kamu mencabutnya di sana.
 
@@ -60,6 +68,7 @@ Jendela daftar rekaman punya dua tab (muncul bila aplikasi dibuka dari panel):
 - **Cloud**: rekaman yang ada di tujuan cloud terpilih (`<akun>:<folder>/`, lihat Pengaturan > Cloud). Daftar dimuat di latar dari `rclone lsjson`; hanya folder rekaman yang tampil
   (berkas lepas dan nama tidak aman dilewati). Kartu menunjukkan ukuran, jumlah berkas, tanggal, dan "sudah ada di komputer" bila folder lokalnya ada.
   Tombol **unduh** menyalin folder itu ke folder rekaman lokal (`rclone copy`: berkas yang sama persis dilewati), dengan cincin progres dan jeda/lanjut yang sama seperti upload.
+  Tombol itu **mati** untuk kartu yang sudah ada di komputer (status "sudah ada di komputer") — mengunduh ulang tidak ada gunanya dan hanya menimpa berkas yang sama.
   Setelah selesai, rekaman muncul di tab Local. Daftar cloud tidak dimuat ulang tiap pindah tab; ia dimuat ulang oleh **Muat ulang**, saat tujuan berubah, dan setelah ada upload selesai.
 
 Unduhan tidak ikut dibatalkan saat tujuan diganti (prosesnya sudah terikat ke akun asalnya); menutup aplikasi saat ada upload atau unduhan meminta konfirmasi.
