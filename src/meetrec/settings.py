@@ -10,7 +10,7 @@ from PySide6.QtCore import QSettings, QSize, Qt, Signal
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit,
                                QInputDialog, QMessageBox, QProgressBar, QPushButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget)
 
-from . import cloud, upload
+from . import cloud, mcpconn, upload
 from .job import Job
 from .meetbridge import DEFAULT_PORT
 from .widgets import BUTTON_STYLE, FG, SECTION_STYLE, IconButton, Section, SidebarPages, make_icon
@@ -126,6 +126,195 @@ class AccountCard(QFrame):
 
     def set_folder(self, folder: str) -> None:
         self.folder.setText(f"Folder tujuan: {folder or '(level atas)'}")
+
+
+class McpCard(QFrame):
+    """One MCP server as a card: name · url, a state line, the tool list once connected, and the icon
+    buttons of THAT state — Sambung when idle, Putus + Restart when connected (never all three)."""
+
+    connect_clicked = Signal()
+    disconnect_clicked = Signal()
+    restart_clicked = Signal()
+
+    def __init__(self, name: str, title: str, url: str, key: str = ""):
+        super().__init__()
+        self.name = name
+        self.setObjectName("accountCard")
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(12, 10, 12, 10)
+        outer.setSpacing(8)
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        text = QVBoxLayout()
+        text.setSpacing(2)
+        self.title = QLabel(f"<b>{title}</b>  ·  MCP")
+        self.status = QLabel("", objectName="status")
+        self.status.setWordWrap(True)
+        self.tools = QLabel("", objectName="status")
+        self.tools.setWordWrap(True)
+        self.tools.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        text.addWidget(self.title)
+        text.addWidget(self.status)
+        text.addWidget(self.tools)
+        self.connect_btn = IconButton("play", "Sambungkan ke server MCP")
+        self.disconnect_btn = IconButton("close", "Putuskan sambungan", tone="danger")
+        self.restart_btn = IconButton("undo", "Restart: putus, hapus cache koneksi, lalu sambung ulang")
+        row.addLayout(text, 1)
+        for b in (self.connect_btn, self.disconnect_btn, self.restart_btn):
+            row.addWidget(b, 0, Qt.AlignmentFlag.AlignVCenter)
+        outer.addLayout(row)
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        self.url_edit = QLineEdit(url)
+        self.url_edit.setPlaceholderText(mcpconn.DEFAULT_URL)
+        self.key_edit = QLineEdit(key)
+        self.key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.key_edit.setPlaceholderText("opsional — MCP publik tanpa kunci biarkan kosong")
+        form.addRow("URL", self.url_edit)
+        form.addRow("Key", self.key_edit)
+        outer.addLayout(form)
+        self.connect_btn.clicked.connect(self.connect_clicked.emit)
+        self.disconnect_btn.clicked.connect(self.disconnect_clicked.emit)
+        self.restart_btn.clicked.connect(self.restart_clicked.emit)
+
+    def refresh(self, conn: "mcpconn.Connection", busy: bool = False) -> None:
+        st = conn.state
+        # visibility follows the CONNECTION, disabled-ness follows the running job: pressing Sambung must
+        # not make the button vanish (the user would have no idea what happened).
+        self.connect_btn.setVisible(st != "connected")
+        self.disconnect_btn.setVisible(st == "connected")
+        self.restart_btn.setVisible(st == "connected")
+        for b in (self.connect_btn, self.disconnect_btn, self.restart_btn):
+            b.setEnabled(not busy)
+        if st == "connected":
+            s = conn.server
+            who = " ".join(x for x in (s.get("name", ""), s.get("version", "")) if x) or "server MCP"
+            self.set_status(f"Tersambung ke {who} ({conn.url})", True)
+            names = [t["name"] for t in conn.tools]
+            self.tools.setText(f"{len(names)} tool: " + (", ".join(names) if names else "(tidak ada)"))
+        elif st == "connecting":
+            self.set_status(f"Menyambung ke {conn.url}…", None)
+            self.tools.setText("")
+        else:
+            self.set_status(f"Belum tersambung ({conn.url})", None)
+            self.tools.setText("")
+
+    def set_status(self, text: str, ok: bool | None = None) -> None:
+        color = {True: "#7fd18b", False: "#ff6b6b", None: "#8f98ad"}[ok]
+        self.status.setText(f'<span style="color:{color}">{text}</span>')
+
+
+# one Connection per MCP server, kept for the life of the process: closing the settings window must not
+# tear down a live session (and reopening it must show the same state).
+CONNECTIONS: dict[str, "mcpconn.Connection"] = {}
+
+
+def mcp_connection(name: str, url: str) -> "mcpconn.Connection":
+    if name not in CONNECTIONS:
+        CONNECTIONS[name] = mcpconn.Connection(name, url)
+    return CONNECTIONS[name]
+
+
+class McpPage(QScrollArea):
+    """MCP page: the servers meetrec can talk to, each with its own connect / disconnect / restart.
+
+    URL and key are typed here (key optional: public MCP servers need none) and kept in QSettings,
+    NOT in ~/.meetrec/mcp — that directory is the connection cache and Restart wipes it.
+    """
+
+    SERVERS = [("transkrip", "Ultraman Transkrip", mcpconn.DEFAULT_URL)]
+
+    def __init__(self, settings: QSettings | None = None):
+        super().__init__()
+        self.settings = settings or QSettings()
+        self.setWidgetResizable(True)
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self._job: Job | None = None
+        self._cards: dict[str, McpCard] = {}
+
+        inner = QWidget()
+        v = QVBoxLayout(inner)
+        v.setContentsMargins(0, 0, 8, 0)
+        v.setSpacing(12)
+        sec = Section("Server MCP")
+        hint = QLabel("Server MCP dijalankan oleh project pemiliknya (di sini: ultraman-transkrip, `python -m mcp_server` "
+                      "di port 8100). Meetrec hanya menyambung — tombol Sambung tidak menyalakan servernya. "
+                      "URL dan Key disimpan di setelan meetrec; Key opsional (MCP publik tanpa kunci biarkan kosong). "
+                      "Restart = putus, hapus cache koneksi (~/.meetrec/mcp), lalu sambung lagi.",
+                      objectName="status")
+        hint.setWordWrap(True)
+        sec.body.addWidget(hint)
+        self.list = QVBoxLayout()
+        self.list.setSpacing(8)
+        for name, title, url in self.SERVERS:
+            card = McpCard(name, title, self._load(name, "url", url), self._load(name, "key", ""))
+            card.connect_clicked.connect(lambda n=name: self.run("connect", n))
+            card.disconnect_clicked.connect(lambda n=name: self.run("disconnect", n))
+            card.restart_clicked.connect(lambda n=name: self.run("restart", n))
+            card.url_edit.editingFinished.connect(lambda n=name: self.save(n))
+            card.key_edit.editingFinished.connect(lambda n=name: self.save(n))
+            self._cards[name] = card
+            self.list.addWidget(card)
+        sec.body.addLayout(self.list)
+        self.msg = QLabel("", objectName="status")
+        self.msg.setWordWrap(True)
+        sec.body.addWidget(self.msg)
+        v.addWidget(sec)
+        v.addStretch(1)
+        self.setWidget(inner)
+        self.refresh()
+
+    def _load(self, name: str, field: str, default: str) -> str:
+        return str(self.settings.value(f"mcp/{name}/{field}", default) or default)
+
+    def save(self, name: str) -> None:
+        """Persist what is typed on the card and push it into the (not-yet-connected) connection."""
+        card, conn = self._cards[name], self.conn(name)
+        url = card.url_edit.text().strip() or mcpconn.DEFAULT_URL
+        key = card.key_edit.text().strip()
+        self.settings.setValue(f"mcp/{name}/url", url)
+        self.settings.setValue(f"mcp/{name}/key", key)
+        conn.url, conn.key = url, key
+        if conn.state == "idle":
+            card.refresh(conn)
+
+    def conn(self, name: str) -> "mcpconn.Connection":
+        card = self._cards.get(name)
+        url = card.url_edit.text().strip() if card else ""
+        return mcp_connection(name, url or mcpconn.DEFAULT_URL)
+
+    def busy(self) -> bool:
+        return bool(self._job and self._job.isRunning())
+
+    def refresh(self) -> None:
+        for name, card in self._cards.items():
+            card.refresh(self.conn(name), self.busy())
+
+    def run(self, action: str, name: str) -> None:
+        if self.busy():
+            return
+        self.save(name)  # URL/key typed on the card are what we connect with
+        conn = self.conn(name)
+        self._say({"connect": "Menyambung…", "disconnect": "Memutus…", "restart": "Restart: cache dibuang, menyambung ulang…"}[action], None)
+        self._job = Job(getattr(conn, action))
+        self._job.done.connect(lambda err, n=name, a=action: self._done(n, a, err))
+        card = self._cards[name]
+        card.refresh(conn, True)
+        self._job.start()
+
+    def _done(self, name: str, action: str, err: str) -> None:
+        conn = self.conn(name)
+        self._cards[name].refresh(conn)
+        if err:
+            return self._say(f"{action.capitalize()} gagal: {err}", True)
+        if action == "disconnect":
+            self._say("Sambungan diputus.", False)
+        else:
+            self._say(f"Tersambung ke {conn.server.get('name') or name} — {len(conn.tools)} tool tersedia.", False)
+
+    def _say(self, text: str, error: bool | None) -> None:
+        color = {True: "#ff6b6b", False: "#7fd18b", None: "#8f98ad"}[error]
+        self.msg.setText(f'<span style="color:{color}">{text}</span>')
 
 
 class AddConnectionPage(QWidget):
@@ -547,10 +736,12 @@ class SettingsDialog(QDialog):
         self.setMinimumSize(640, 420)
         self.general = GeneralPage(settings, token, port)
         self.cloud = CloudPage(settings, uploads)
+        self.mcp = McpPage(settings)
         self.add_page = AddConnectionPage()
         self.tabs = SidebarPages()
         self.tabs.add_page("General", self.general)
         self.tabs.add_page("Cloud", self.cloud)
+        self.tabs.add_page("MCP", self.mcp)
         self.tabs.set_page(tab)
         # the General controls keep their old names on the dialog
         self.video, self.fps, self.rate = self.general.video, self.general.fps, self.general.rate
@@ -560,7 +751,7 @@ class SettingsDialog(QDialog):
         mv = QVBoxLayout(main)
         mv.setContentsMargins(0, 0, 0, 0)
         buttons = QHBoxLayout()
-        hint = QLabel("Simpan berlaku untuk tab General. Tab Cloud langsung berlaku.", objectName="status")
+        hint = QLabel("Simpan berlaku untuk tab General. Tab Cloud dan MCP langsung berlaku.", objectName="status")
         buttons.addWidget(hint, 1)
         cancel = QPushButton("Batal")
         cancel.clicked.connect(self.reject)

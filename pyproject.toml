@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Personal meeting recorder: mic + system audio (device level), per-speaker timeline with overlap"
 requires-python = ">=3.11"
 dependencies = [
-    "numpy", "sherpa-onnx", "certifi", "soundfile", "soxr", "soundcard", "PySide6", "mss", "av<17", "imageio-ffmpeg",
+    "numpy", "sherpa-onnx", "certifi", "soundfile", "soxr", "soundcard", "PySide6", "mss", "av<17", "imageio-ffmpeg", "mcp",
     "catap; sys_platform == 'darwin'", "pyobjc-framework-Quartz; sys_platform == 'darwin'",
     "python-xlib; sys_platform == 'linux'",
 ]
