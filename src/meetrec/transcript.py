@@ -4,7 +4,8 @@ mic.wav    -> every word is "Me".
 system.wav -> every word gets the speaker active at that moment in speakers.json (a Meet name when the extension
               supplied one, else "Remote N"). Words inside an overlap are tagged "A|B" and never guessed.
 Both tracks are shifted by their offset from meta.json, so the lines of the two sides interleave in the real order.
-Needs the optional package faster-whisper (pip install -e ".[transcribe]"); the model is downloaded on first use.
+ASR comes from the ultraman-transkrip repo's backend over HTTP (see remoteasr.py); faster-whisper is the
+fallback when that backend is down and the optional package is installed.
 """
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ from typing import Callable
 
 from .diarize import Segment
 from .merge import Turn, build_turns, interleave, to_markdown
+from .remoteasr import pick_transcriber
 from .speakerdata import DEFAULT_THRESHOLD, load_speakers, track_offsets
 
 
@@ -42,15 +44,18 @@ def _shift(words: list, by: float) -> list:
 
 
 def build_transcript(folder: Path, language: str | None = "id", model: str = "small", speakers: int = -1,
-                     threshold: float = DEFAULT_THRESHOLD) -> Path:
-    """Writes transcript.json + transcript.md next to the recording (and speakers.json first, when missing)."""
-    from .asr import transcribe  # imported here: faster-whisper is optional
+                     threshold: float = DEFAULT_THRESHOLD, transcribe: Callable | None = None) -> Path:
+    """Writes transcript.json + transcript.md next to the recording (and speakers.json first, when missing).
+
+    `transcribe` defaults to the repo transkrip backend (remoteasr) and falls back to faster-whisper
+    when that backend is unreachable.
+    """
     from .timeline import build_timeline
 
     folder = Path(folder)
     if load_speakers(folder) is None or speakers != -1:
         build_timeline(folder, speakers, threshold)
-    turns = transcript_turns(folder, transcribe, language, model)
+    turns = transcript_turns(folder, transcribe or pick_transcriber(), language, model)
     (folder / "transcript.json").write_text(json.dumps([asdict(t) for t in turns], ensure_ascii=False, indent=1))
     out = folder / "transcript.md"
     out.write_text(to_markdown(turns))
