@@ -23,6 +23,7 @@ from .job import Job
 from . import cloud
 from .fullmedia import build_full_media, is_up_to_date, timeline_start
 from .paths import DEFAULT_OUT, list_recordings
+from .merge import fmt_time
 from .speakerdata import display_name, load_speakers, load_transcript, set_label
 from .upload import ACTIVE, Upload, UploadManager, list_cloud_recordings
 from .widgets import BUTTON_STYLE, FG, IconButton, ProgressIconButton, make_icon
@@ -470,12 +471,9 @@ class PlayerWindow(QWidget):
 
     def _fill_lines(self) -> None:
         self.lines.clear()
-        colors = self.lanes.colors
         for t in self.turns:
-            ids = t["speaker"].split("|")
-            who = " + ".join(self._name(k) for k in ids) + (" (tumpang tindih)" if len(ids) > 1 else "")
-            item = QListWidgetItem(f"{_clock(int((t['start'] - self.t_start) * 1000))}  {who}: {t['text']}")
-            item.setForeground(QColor(OVERLAP_COLOR if len(ids) > 1 else colors.get(ids[0], "#cfd5e3")))
+            item = QListWidgetItem(f"{fmt_time(t['start'] - self.t_start)}: {t['text']}")
+            item.setForeground(QColor("#cfd5e3"))
             item.setData(Qt.ItemDataRole.UserRole, t["start"] - self.t_start)
             self.lines.addItem(item)
 
