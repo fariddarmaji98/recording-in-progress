@@ -637,7 +637,7 @@ def recording_info(folder: Path) -> dict:
     final = is_up_to_date(folder)
     main = folder / ("full.mp4" if final else "video.mp4")
     try:
-        dur = float(json.loads((folder / "meta.json").read_text()).get("duration_sec") or 0)
+        dur = float(json.loads((folder / "meta.json").read_text(encoding="utf-8")).get("duration_sec") or 0)
     except (OSError, ValueError):
         dur = 0.0
     size = main.stat().st_size if main.exists() else 0

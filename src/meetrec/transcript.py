@@ -86,9 +86,9 @@ def build_transcript(folder: Path, language: str | None = "id", model: str = "sm
             on_event({"text": text, "pct": pct})
 
     turns = transcript_turns(folder, transcribe or pick_transcriber(), language, model, on_event=on_event)
-    (folder / "transcript.json").write_text(json.dumps([asdict(t) for t in turns], ensure_ascii=False, indent=1))
+    (folder / "transcript.json").write_text(json.dumps([asdict(t) for t in turns], ensure_ascii=False, indent=1), encoding="utf-8")
     out = folder / "transcript.md"
-    out.write_text(to_markdown(turns))
+    out.write_text(to_markdown(turns), encoding="utf-8")
     say(f"{len(turns)} baris transkrip ditulis ke transcript.md", 100)
     return out
 

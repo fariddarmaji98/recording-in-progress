@@ -17,7 +17,7 @@ def track_offsets(folder: Path) -> dict[str, float]:
     meta = Path(folder) / "meta.json"
     if not meta.exists():
         return {}
-    tracks = json.loads(meta.read_text()).get("tracks", {})
+    tracks = json.loads(meta.read_text(encoding="utf-8")).get("tracks", {})
     return {name: float(t.get("offset_sec") or 0.0) for name, t in tracks.items()}
 
 
@@ -25,7 +25,7 @@ def load_speakers(folder: Path) -> dict | None:
     """speakers.json of a recording, or None when it is missing or broken."""
     f = Path(folder) / "speakers.json"
     try:
-        doc = json.loads(f.read_text())
+        doc = json.loads(f.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     return doc if isinstance(doc.get("segments"), list) else None
@@ -40,7 +40,7 @@ def set_label(folder: Path, speaker: str, name: str) -> None:
     """Remember a name for a speaker id ("Remote 1" -> "Budi") inside speakers.json. Empty name = back to the id.
     Only the label table changes; segments stay as the analysis wrote them."""
     f = Path(folder) / "speakers.json"
-    doc = json.loads(f.read_text())
+    doc = json.loads(f.read_text(encoding="utf-8"))
     labels = dict(doc.get("labels") or {})
     name = name.strip()[:60]
     if name and name != speaker:
@@ -51,13 +51,13 @@ def set_label(folder: Path, speaker: str, name: str) -> None:
         doc["labels"] = labels
     else:
         doc.pop("labels", None)
-    f.write_text(json.dumps(doc, ensure_ascii=False, indent=1))
+    f.write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
 def load_transcript(folder: Path) -> list[dict] | None:
     f = Path(folder) / "transcript.json"
     try:
-        turns = json.loads(f.read_text())
+        turns = json.loads(f.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     return turns if isinstance(turns, list) else None

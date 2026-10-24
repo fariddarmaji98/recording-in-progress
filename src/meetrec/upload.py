@@ -104,7 +104,7 @@ class Upload(QObject):
         self._lock = threading.Lock()
 
     def start(self) -> None:
-        self._proc = subprocess.Popen(self._cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        self._proc = subprocess.Popen(self._cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
                                       **cloud._NO_WINDOW)
         threading.Thread(target=self._read, daemon=True, name="meetrec-upload").start()
 
@@ -294,7 +294,7 @@ def list_cloud_recordings(exe: Path, target: Target, timeout: int = 240) -> list
         # --retries 1 / --low-level-retries 2 turned one throttled response into a hard failure.
         r = subprocess.run([str(exe), "--config", str(cloud.CONFIG), "lsjson", remote, "--recursive", "--files-only",
                             "--contimeout", "15s", "--timeout", "30s"],
-                           capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL, **cloud._NO_WINDOW)
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, stdin=subprocess.DEVNULL, **cloud._NO_WINDOW)
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"Tidak ada jawaban dari cloud dalam {timeout} detik")
     if r.returncode == 3 or "directory not found" in (r.stderr or "").lower():

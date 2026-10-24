@@ -35,7 +35,7 @@ def cmd_record(a: argparse.Namespace) -> None:
         pass
     folder = s.stop()
     print(f"\nSelesai: {folder}")
-    meta = json.loads((folder / "meta.json").read_text())
+    meta = json.loads((folder / "meta.json").read_text(encoding="utf-8"))
     for name, t in meta["tracks"].items():
         if t["silent"]:
             print(f"PERINGATAN: track '{name}' diam sama sekali. Cek izin mikrofon / rekam audio sistem untuk aplikasi terminal ini.")
@@ -45,7 +45,7 @@ def cmd_timeline(a: argparse.Namespace) -> None:
     from .timeline import build_timeline
 
     out = build_timeline(a.folder, a.speakers, a.threshold)
-    data = json.loads(out.read_text())
+    data = json.loads(out.read_text(encoding="utf-8"))
     who = sorted({s["speaker"] for s in data["segments"]})
     ov = sum(o["end"] - o["start"] for o in data["overlaps"])
     print(f"{out}\n  pembicara: {', '.join(who)}\n  segmen: {len(data['segments'])}, overlap: {len(data['overlaps'])} kali ({ov:.1f} detik)")

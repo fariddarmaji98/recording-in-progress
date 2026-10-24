@@ -793,7 +793,7 @@ class Panel(QWidget):
             meet = self.bridge.end() if self.bridge.recording else None
             try:
                 if meet and meet["events"]:
-                    (self.session.dir / "meet_events.json").write_text(json.dumps(meet, ensure_ascii=False, indent=1))
+                    (self.session.dir / "meet_events.json").write_text(json.dumps(meet, ensure_ascii=False, indent=1), encoding="utf-8")
                     self.session.extra_meta["meet"] = {"meeting": meet["meeting"], "events": len(meet["events"]),
                                                        "names": sorted({i["name"] for i in meet["intervals"] if not i["self"]})}
                 if self.video:
@@ -803,7 +803,7 @@ class Panel(QWidget):
                         warn += f"<br><span style='color:#ffb86b'>Video bermasalah: {self.video.error}</span>"
                     self.video = None
                 folder = self.session.stop()
-                meta = json.loads((folder / "meta.json").read_text())
+                meta = json.loads((folder / "meta.json").read_text(encoding="utf-8"))
                 silent = [n for n, t in meta["tracks"].items() if t["silent"]]
                 if silent:
                     warn += f"<br><span style='color:#ffb86b'>Track diam: {', '.join(silent)}. Cek izin mikrofon / audio sistem.</span>"

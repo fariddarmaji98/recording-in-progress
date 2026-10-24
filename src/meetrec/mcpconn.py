@@ -162,7 +162,7 @@ class Connection:
             self.cache_path.parent.mkdir(parents=True, exist_ok=True)
             self.cache_path.write_text(json.dumps(
                 {"url": self.url, "connected_at": time.time(), "server": self.server, "tools": self.tools},
-                ensure_ascii=False, indent=1))
+                ensure_ascii=False, indent=1), encoding="utf-8")
         except OSError:
             pass  # cache is a convenience; a failed write must not break a working connection
 

@@ -41,7 +41,7 @@ def timeline_start(folder: Path) -> float:
     player maps to timeline = position + timeline_start()."""
     folder = Path(folder)
     meta_file = folder / "meta.json"
-    meta = json.loads(meta_file.read_text()) if meta_file.exists() else {}
+    meta = json.loads(meta_file.read_text(encoding="utf-8")) if meta_file.exists() else {}
     tracks = meta.get("tracks", {})
     starts = [float(tracks.get(n, {}).get("offset_sec") or 0.0) for n in ("mic", "system") if (folder / f"{n}.wav").exists()]
     return min([float((meta.get("video") or {}).get("offset_sec") or 0.0)] + starts)
@@ -58,7 +58,7 @@ def build_mix_wav(folder: Path, out_name: str = "mix.wav") -> Path:
     """
     folder = Path(folder)
     meta_file = folder / "meta.json"
-    meta = json.loads(meta_file.read_text()) if meta_file.exists() else {}
+    meta = json.loads(meta_file.read_text(encoding="utf-8")) if meta_file.exists() else {}
     tracks = meta.get("tracks", {})
     audio = [(folder / f"{name}.wav", float(tracks.get(name, {}).get("offset_sec") or 0.0))
              for name in ("mic", "system") if (folder / f"{name}.wav").exists()]
@@ -74,7 +74,7 @@ def build_mix_wav(folder: Path, out_name: str = "mix.wav") -> Path:
                   + f"amix=inputs={len(audio)}:normalize=0:duration=longest[mix]")
     out = folder / out_name
     cmd += ["-filter_complex", ";".join(chains), "-map", "[mix]", "-ac", "1", str(out)]
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if r.returncode != 0:
         raise RuntimeError(f"ffmpeg gagal: {r.stderr.strip()[-400:]}")
     return out
@@ -83,7 +83,7 @@ def build_mix_wav(folder: Path, out_name: str = "mix.wav") -> Path:
 def build_full_media(folder: Path, out_name: str = "full.mp4") -> Path:
     folder = Path(folder)
     meta_file = folder / "meta.json"
-    meta = json.loads(meta_file.read_text()) if meta_file.exists() else {}
+    meta = json.loads(meta_file.read_text(encoding="utf-8")) if meta_file.exists() else {}
     video = folder / "video.mp4"
     if not video.exists():
         raise FileNotFoundError(f"{video} tidak ada: tidak ada video untuk digabung")
@@ -122,7 +122,7 @@ def build_full_media(folder: Path, out_name: str = "full.mp4") -> Path:
     out = folder / out_name
     cmd += ["-movflags", "+faststart", str(out)]
 
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if r.returncode != 0:
         raise RuntimeError(f"ffmpeg gagal: {r.stderr.strip()[-400:]}")
     return out

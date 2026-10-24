@@ -52,7 +52,7 @@ def find_rclone() -> Path | None:
 def rclone_version(exe: Path) -> str | None:
     """"v1.75.2", or None when the file does not run."""
     try:
-        r = subprocess.run([str(exe), "version"], capture_output=True, text=True, timeout=10, **_NO_WINDOW)
+        r = subprocess.run([str(exe), "version"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10, **_NO_WINDOW)
     except (OSError, subprocess.SubprocessError):
         return None
     m = re.match(r"rclone (v[\w.\-+]+)", r.stdout or "")
@@ -278,7 +278,7 @@ class OAuthLogin:
             raise RuntimeError("Nama akun tidak valid")
         CONFIG.parent.mkdir(parents=True, exist_ok=True)
         self._proc = subprocess.Popen([str(self.exe), "--config", str(CONFIG), "config", "create", self.name, self.backend],
-                                      stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **_NO_WINDOW)
+                                      stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", **_NO_WINDOW)
         try:
             out, _ = self._proc.communicate(timeout=self.timeout)
         except subprocess.TimeoutExpired:
@@ -311,7 +311,7 @@ def test_remote(exe: Path, name: str, timeout: int = 180) -> str:
         # -v is needed only so the pacer's "low level retry N/10" lines reach stderr and can be counted.
         r = subprocess.run([str(exe), "--config", str(CONFIG), "lsd", f"{name}:", "--max-depth", "1",
                             "--contimeout", "15s", "--timeout", "30s", "-v"],
-                           capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL, **_NO_WINDOW)
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, stdin=subprocess.DEVNULL, **_NO_WINDOW)
     except subprocess.TimeoutExpired:
         raise RuntimeError("Tidak ada jawaban dalam %d detik" % timeout)
     took = time.monotonic() - started

@@ -15,7 +15,7 @@ def list_recordings(root: Path = DEFAULT_OUT) -> list[tuple[Path, str]]:
         if not ((d / "video.mp4").exists() and (d / "meta.json").exists()):
             continue
         try:
-            sec = int(json.loads((d / "meta.json").read_text()).get("duration_sec") or 0)
+            sec = int(json.loads((d / "meta.json").read_text(encoding="utf-8")).get("duration_sec") or 0)
             when = datetime.strptime(d.name, "%Y-%m-%d_%H-%M-%S").strftime("%Y-%m-%d %H:%M:%S")
         except Exception:
             sec, when = 0, d.name

@@ -45,7 +45,7 @@ def load_meet(folder: Path) -> list[dict]:
     if not f.exists():
         return []
     try:
-        ivs = json.loads(f.read_text()).get("intervals", [])
+        ivs = json.loads(f.read_text(encoding="utf-8")).get("intervals", [])
     except (ValueError, OSError):
         return []
     return [i for i in ivs if not i.get("self")]
@@ -138,7 +138,7 @@ def build_timeline(folder: Path, remote_speakers: int = -1, threshold: float = D
     doc = {"segments": segs, "overlaps": overlaps}
     if meet_info is not None:
         doc["meet"] = meet_info
-    out.write_text(json.dumps(doc, ensure_ascii=False, indent=1))
+    out.write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8")
     return out
 
 
@@ -164,7 +164,7 @@ def _slice(audio: np.ndarray, offset: float, start: float, end: float) -> np.nda
 
 def split_sections(folder: Path) -> Path:
     """One wav per speaker per section, plus one mixed clip per overlap (both voices together)."""
-    data = json.loads((folder / "speakers.json").read_text())
+    data = json.loads((folder / "speakers.json").read_text(encoding="utf-8"))
     off = _offsets(folder)
     audio = {t: load_16k_mono(folder / f"{t}.wav") for t in ("mic", "system") if (folder / f"{t}.wav").exists()}
     out = folder / "sections"
@@ -190,5 +190,5 @@ def split_sections(folder: Path) -> Path:
             index.append({"file": f"_overlaps/{name}", "speaker": " + ".join(o["speakers"]),
                           "start": o["start"], "end": o["end"], "has_overlap": True})
 
-    (out / "index.json").write_text(json.dumps(index, ensure_ascii=False, indent=1))
+    (out / "index.json").write_text(json.dumps(index, ensure_ascii=False, indent=1), encoding="utf-8")
     return out

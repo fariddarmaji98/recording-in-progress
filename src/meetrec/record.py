@@ -311,5 +311,5 @@ class Session:
                 "ready_sec": round((self.live_from or self.t0) - self.t0, 3),
                 "duration_sec": round(self.active_seconds(), 3), "pauses": self._pauses, "tracks": tracks,
                 **self.extra_meta}
-        (self.dir / "meta.json").write_text(json.dumps(meta, indent=1))
+        (self.dir / "meta.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
         return self.dir
