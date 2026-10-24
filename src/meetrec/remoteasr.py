@@ -129,6 +129,14 @@ def server_options(base: str | None = None) -> dict | None:
         return None
 
 
+def set_server_model(model: str, base: str | None = None) -> dict:
+    """Ganti model lokal server (`PATCH /config`). 409 kalau ada transkrip berjalan."""
+    url = f"{(base or DEFAULT_BASE).rstrip('/')}/config"
+    req = urllib.request.Request(url, data=json.dumps({"model": model}).encode(), method="PATCH",
+                                 headers={"Content-Type": "application/json"})
+    return _json(req)
+
+
 def pick_transcriber(base: str | None = None):
     """Satu backend untuk SEMUA track (mic + system), dipilih sekali di awal.
 

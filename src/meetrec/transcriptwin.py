@@ -42,11 +42,11 @@ QPushButton:disabled { background: #232835; color: #6f7890; }
 """
 
 
-def _local_engine() -> Callable:
+def _local_engine(model: str = "small") -> Callable:
     """faster-whisper lokal (paket opsional). Word-level: digabung jadi giliran."""
     from . import asr
 
-    def local(path, language="id", model="small", on_event=None):
+    def local(path, language="id", model=model, on_event=None):
         try:
             return asr.transcribe(path, language, model)
         except ImportError:
@@ -127,6 +127,7 @@ class TranskripWindow(QDialog):
         from .remoteasr import server_options
 
         opts = server_options() or {}
+        self._server_model = opts.get("model") or ""
         langs = [(str(x.get("label") or x["id"]), x["id"]) for x in opts.get("languages") or [] if "id" in x] \
             or FALLBACK_LANGS
         if not any(code is None for _, code in langs):
@@ -134,12 +135,24 @@ class TranskripWindow(QDialog):
         for label, code in langs:
             self.lang.addItem(label, code)
 
-        model = opts.get("model")
-        self.engine.addItem(f"Server transkrip — {model}" if model else "Server transkrip (bawaan)", "server")
-        self.engine.setItemData(0, "Unggah ke repo transkrip; modelnya dipilih di setelan aplikasi itu",
+        models = opts.get("models") or []
+        active = -1
+        for m in models:
+            mid = str(m.get("id"))
+            mark = " • aktif" if mid == self._server_model else ""
+            self.engine.addItem(f"Server · {m.get('label') or mid} ({m.get('size') or '?'}){mark}",
+                                {"kind": "server", "model": mid})
+            if mark:
+                active = self.engine.count() - 1
+            if m.get("note"):
+                self.engine.setItemData(self.engine.count() - 1, str(m["note"]), Qt.ItemDataRole.ToolTipRole)
+        if not models:
+            self.engine.addItem("Server transkrip (bawaan)", {"kind": "server", "model": ""})
+        self.engine.addItem("Lokal · faster-whisper small", {"kind": "local", "model": "small"})
+        self.engine.setItemData(self.engine.count() - 1, "Jalan di mesin ini; butuh paket faster-whisper",
                                 Qt.ItemDataRole.ToolTipRole)
-        self.engine.addItem("faster-whisper lokal (small)", "local")
-        self.engine.setItemData(1, "Jalan di mesin ini; butuh paket faster-whisper", Qt.ItemDataRole.ToolTipRole)
+        if active >= 0:
+            self.engine.setCurrentIndex(active)
         if not opts:
             self.phase.setText("backend transkrip tidak menjawab — 'server' tetap dicoba saat Mulai")
 
@@ -160,11 +173,21 @@ class TranskripWindow(QDialog):
         self.job.done.connect(self._finished)
         self.job.start()
 
-    def _work(self, lang: str | None, engine: str) -> None:
-        from .remoteasr import pick_transcriber
+    def _work(self, lang: str | None, choice: dict) -> None:
+        from . import remoteasr
         from .transcript import build_transcript
 
-        transcribe = pick_transcriber() if engine == "server" else _local_engine()
+        if choice.get("kind") == "local":
+            transcribe = _local_engine(str(choice.get("model") or "small"))
+        else:
+            model = str(choice.get("model") or "")
+            if model and model != self._server_model:
+                self._emit({"text": f"mengganti model server → {model}", "pct": 1})
+                try:
+                    remoteasr.set_server_model(model)
+                except RuntimeError as e:
+                    raise RuntimeError(f"tidak bisa memakai {model}: {e}") from None
+            transcribe = remoteasr.pick_transcriber()
         build_transcript(self.folder, lang, transcribe=transcribe, on_event=self._emit)
 
     def _emit(self, ev: dict) -> None:
