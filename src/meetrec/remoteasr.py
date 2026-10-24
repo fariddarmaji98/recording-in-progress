@@ -118,6 +118,17 @@ def reachable(base: str | None = None) -> bool:
         return False
 
 
+def server_options(base: str | None = None) -> dict | None:
+    """Bahasa + model yang tersedia di server, untuk isi dropdown setelan transkrip.
+
+    `None` = server tidak menjawab; pemanggil memakai daftar bawaannya sendiri.
+    """
+    try:
+        return _get(f"{(base or DEFAULT_BASE).rstrip('/')}/config")
+    except Exception:  # noqa: BLE001 — isi dropdown tidak boleh menggagalkan jendela
+        return None
+
+
 def pick_transcriber(base: str | None = None):
     """Satu backend untuk SEMUA track (mic + system), dipilih sekali di awal.
 

@@ -79,7 +79,7 @@ ME_COLOR = "#38c172"
 OVERLAP_COLOR = "#ff8a3d"
 # none of these is the green of "Me" or the orange of overlaps
 SPEAKER_COLORS = ["#4a6cf7", "#d65db1", "#3fb8af", "#9b7bf0", "#4fa8e8", "#e6c84a"]
-LANGUAGES = [("Indonesia", "id"), ("English", "en"), ("Otomatis", None)]
+LANGUAGES = [("Indonesia", "id"), ("English", "en"), ("Otomatis", None)]  # dipakai CLI lama
 
 
 def speaker_order(segments: list[dict]) -> list[str]:
@@ -266,16 +266,11 @@ class PlayerWindow(QWidget):
         for n in range(1, 9):
             self.count.addItem(f"Remote: {n} orang")
         self.count.setToolTip("Jumlah orang di sisi lawan bicara (bukan kamu). Otomatis kadang salah hitung: kalau tahu jumlahnya, pilih sendiri lalu Analisis ulang.")
-        self.lang = QComboBox()
-        for label, _code in LANGUAGES:
-            self.lang.addItem(label)
-        self.lang.setToolTip("Bahasa untuk transkrip")
         self.text_btn = QPushButton("Buat transkrip")
-        self.text_btn.setToolTip("Tulis apa yang dikatakan tiap pembicara. Butuh paket faster-whisper; pertama kali mengunduh model ±480 MB.")
+        self.text_btn.setToolTip("Buka jendela transkrip: pilih bahasa dan mesin di sana, lalu tekan Mulai.")
         self.text_btn.clicked.connect(self.transcribe)
         head.addWidget(self.count)
         head.addWidget(self.analyze_btn)
-        head.addWidget(self.lang)
         head.addWidget(self.text_btn)
         wv.addLayout(head)
         self.lanes = SpeakerLanes()
@@ -463,7 +458,7 @@ class PlayerWindow(QWidget):
     def _who_buttons(self) -> None:
         busy = bool(self._job and self._job.isRunning())
         has_audio = bool(self.folder and any((self.folder / n).exists() for n in ("mic.wav", "system.wav")))
-        for w in (self.analyze_btn, self.text_btn, self.lang, self.count):
+        for w in (self.analyze_btn, self.text_btn, self.count):
             w.setEnabled(has_audio and not busy)
 
     def _name(self, speaker: str) -> str:
@@ -528,7 +523,7 @@ class PlayerWindow(QWidget):
         self._job.start()
 
     def _who_buttons_busy(self) -> None:
-        for w in (self.analyze_btn, self.text_btn, self.lang, self.count):
+        for w in (self.analyze_btn, self.text_btn, self.count):
             w.setEnabled(False)
 
     def _job_done(self, err: str) -> None:
@@ -552,9 +547,9 @@ class PlayerWindow(QWidget):
         """Buka jendela progres tersendiri — player tetap terbuka dan bisa diputar."""
         from .transcriptwin import TranskripWindow
 
-        if not self.folder or (self._tw and self._tw.job.isRunning()):
+        if not self.folder or (self._tw and self._tw.job and self._tw.job.isRunning()):
             return
-        self._tw = TranskripWindow(self.folder, LANGUAGES[self.lang.currentIndex()][1])
+        self._tw = TranskripWindow(self.folder)
         self._tw.done.connect(self._transcript_done)
         self._who_buttons_busy()
         self._tw.show()
