@@ -7,6 +7,7 @@ Each track is placed on the shared timeline with its offset from meta.json, so t
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -47,6 +48,17 @@ def timeline_start(folder: Path) -> float:
     return min([float((meta.get("video") or {}).get("offset_sec") or 0.0)] + starts)
 
 
+def _run(cmd: list[str], out: Path) -> None:
+    """Run ffmpeg onto `out.part.<ext>`, then rename: build yang terbunuh tidak pernah tampak jadi."""
+    part = out.with_name(f"{out.stem}.part{out.suffix}")  # ekstensi tetap: ffmpeg memilih muxer dari situ
+    r = subprocess.run(cmd + [str(part)], capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if r.returncode != 0:
+        part.unlink(missing_ok=True)
+        detail = " ".join(r.stderr.split())[:500] or f"ffmpeg keluar dengan kode {r.returncode}"
+        raise RuntimeError(detail)
+    os.replace(part, out)
+
+
 def build_mix_wav(folder: Path, out_name: str = "mix.wav") -> Path:
     """mic + system -> satu wav, untuk rekaman tanpa video (jalur unggah transkrip).
 
@@ -73,10 +85,8 @@ def build_mix_wav(folder: Path, out_name: str = "mix.wav") -> Path:
     chains.append("".join(f"[a{i}]" for i in range(len(audio)))
                   + f"amix=inputs={len(audio)}:normalize=0:duration=longest[mix]")
     out = folder / out_name
-    cmd += ["-filter_complex", ";".join(chains), "-map", "[mix]", "-ac", "1", str(out)]
-    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
-    if r.returncode != 0:
-        raise RuntimeError(f"ffmpeg gagal: {r.stderr.strip()[-400:]}")
+    cmd += ["-filter_complex", ";".join(chains), "-map", "[mix]", "-ac", "1", "-nostdin"]
+    _run(cmd, out)
     return out
 
 
@@ -120,9 +130,7 @@ def build_full_media(folder: Path, out_name: str = "full.mp4") -> Path:
     for k, label in enumerate(["Mix"] + [a[1] for a in audio]):
         cmd += [f"-metadata:s:a:{k}", f"title={label}", f"-metadata:s:a:{k}", f"handler_name={label}"]
     out = folder / out_name
-    cmd += ["-movflags", "+faststart", str(out)]
+    cmd += ["-movflags", "+faststart", "-nostdin"]
 
-    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
-    if r.returncode != 0:
-        raise RuntimeError(f"ffmpeg gagal: {r.stderr.strip()[-400:]}")
+    _run(cmd, out)
     return out

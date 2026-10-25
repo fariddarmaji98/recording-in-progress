@@ -227,6 +227,12 @@ class PlayerWindow(QWidget):
         self.player = QMediaPlayer(self)
         self.audio = QAudioOutput(self)
         self.player.setAudioOutput(self.audio)
+        # Cadangan saat full.mp4 gagal dibuat: video diputar tanpa suara, suaranya
+        # dari mix.wav di player kedua. `self._fallback` menandai mode ini.
+        self.aux = QMediaPlayer(self)
+        self.aux_out = QAudioOutput(self)
+        self.aux.setAudioOutput(self.aux_out)
+        self._fallback = False
         self.video = QVideoWidget()
         self.video.setMinimumSize(640, 360)
         self.player.setVideoOutput(self.video)
@@ -269,13 +275,17 @@ class PlayerWindow(QWidget):
         self.text_btn = QPushButton("Buat transkrip")
         self.text_btn.setToolTip("Buka jendela transkrip: pilih bahasa dan mesin di sana, lalu tekan Mulai.")
         self.text_btn.clicked.connect(self.transcribe)
+        self.export_btn = QPushButton("Ekspor…")
+        self.export_btn.setToolTip("Simpan transkrip ke berkas: .md, .txt, atau .srt")
+        self.export_btn.clicked.connect(self.export)
         head.addWidget(self.count)
         head.addWidget(self.analyze_btn)
         head.addWidget(self.text_btn)
+        head.addWidget(self.export_btn)
         wv.addLayout(head)
         self.lanes = SpeakerLanes()
         self.lanes.setToolTip("Klik = loncat ke menit itu. Klik dua kali nama = beri nama pembicara.")
-        self.lanes.seek.connect(self.player.setPosition)
+        self.lanes.seek.connect(self._seek)
         self.lanes.rename.connect(self.rename_speaker)
         wv.addWidget(self.lanes)
         self.lines = QListWidget()
@@ -293,7 +303,7 @@ class PlayerWindow(QWidget):
         self.slider = QSlider(Qt.Orientation.Horizontal)
         self.slider.setRange(0, 0)
         self.slider.sliderPressed.connect(lambda: setattr(self, "_seeking", True))
-        self.slider.sliderMoved.connect(self.player.setPosition)
+        self.slider.sliderMoved.connect(self._seek)
         self.slider.sliderReleased.connect(self._released)
         self.time_lbl = QLabel("0:00 / 0:00")
         self.time_lbl.setMinimumWidth(110)
@@ -304,7 +314,7 @@ class PlayerWindow(QWidget):
         for label, _ in SPEEDS:
             self.speed.addItem(label)
         self.speed.setCurrentIndex(2)
-        self.speed.currentIndexChanged.connect(lambda i: self.player.setPlaybackRate(SPEEDS[i][1]))
+        self.speed.currentIndexChanged.connect(self._speed_changed)
         ctl.addWidget(self.play_btn)
         ctl.addWidget(self.slider, 1)
         ctl.addWidget(self.time_lbl)
@@ -323,8 +333,8 @@ class PlayerWindow(QWidget):
         self.player.tracksChanged.connect(self._fill_tracks)
         self.player.errorOccurred.connect(lambda _e, msg: self.set_status(f"Gagal memutar: {msg}", True))
         QShortcut(Qt.Key.Key_Space, self, activated=self.toggle)
-        QShortcut(Qt.Key.Key_Left, self, activated=lambda: self.player.setPosition(max(0, self.player.position() - 5000)))
-        QShortcut(Qt.Key.Key_Right, self, activated=lambda: self.player.setPosition(self.player.position() + 5000))
+        QShortcut(Qt.Key.Key_Left, self, activated=lambda: self._seek(max(0, self.player.position() - 5000)))
+        QShortcut(Qt.Key.Key_Right, self, activated=lambda: self._seek(self.player.position() + 5000))
 
         self.refresh_list()
         if folder:  # opened from the recordings list: the list already chose, so no picker here
@@ -390,24 +400,74 @@ class PlayerWindow(QWidget):
         if self._builder:
             self._builder.wait(3000)
         if err:
-            self._enable(False, True)
-            self.set_status(f"Gagal membuat full media: {err}", True)
+            self._fallback_play(err)
             return
         self._load(Path(path))
 
+    def _fallback_play(self, err: str) -> None:
+        """full.mp4 gagal dibuat: rekaman tetap bisa ditonton — video tanpa suara + mix.wav."""
+        if not self.folder or not (self.folder / "video.mp4").exists():
+            self._enable(False, True)
+            self.set_status(f"Gagal membuat full media: {err}", True)
+            return
+        from .fullmedia import build_mix_wav
+
+        try:
+            mix = build_mix_wav(self.folder)  # audio saja: detik-an, bukan menit
+        except Exception as e:
+            mix = None
+            err = f"{err} · audio juga gagal dicampur: {e}"
+        self._enable(True)
+        self._fallback = True
+        self.audio.setMuted(True)  # video asli tidak punya audio; suara dari mix.wav
+        self.player.setSource(QUrl.fromLocalFile(str(self.folder / "video.mp4")))
+        self.aux.setSource(QUrl.fromLocalFile(str(mix)) if mix else QUrl())
+        self.tracks.blockSignals(True)
+        self.tracks.clear()
+        self.tracks.addItem("Mix (video + audio terpisah)")
+        self.tracks.setEnabled(False)
+        self.tracks.blockSignals(False)
+        self.tracks.setToolTip("Mode cadangan: pilih track hanya tersedia di full.mp4")
+        self.set_status(f"{self.folder.name}: full.mp4 gagal dibuat ({err}). "
+                        "Memutar video + audio terpisah — coba 'Generate full media' lagi.", True)
+
+    def _exit_fallback(self) -> None:
+        if not self._fallback:
+            return
+        self._fallback = False
+        self.aux.stop()
+        self.aux.setSource(QUrl())
+        self.audio.setMuted(False)
+        self.tracks.setEnabled(True)
+        self.tracks.setToolTip("Track audio")
+
     def _load(self, path: Path) -> None:
+        self._exit_fallback()
         self._enable(True)
         self.player.setSource(QUrl.fromLocalFile(str(path)))
         self.set_status(f"{self.folder.name}: {path.name}")
 
     # --- transport ---------------------------------------------------------------------------------
+    def _seek(self, ms: int) -> None:
+        self.player.setPosition(ms)
+        if self._fallback:
+            self.aux.setPosition(ms)
+
+    def _speed_changed(self, i: int) -> None:
+        self.player.setPlaybackRate(SPEEDS[i][1])
+        self.aux.setPlaybackRate(SPEEDS[i][1])
+
     def toggle(self) -> None:
         if self.player.source().isEmpty():
             return
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.player.pause()
+            self.aux.pause()
         else:
             self.player.play()
+            if self._fallback:
+                self.aux.setPosition(self.player.position())
+                self.aux.play()
 
     def _state(self, state) -> None:
         playing = state == QMediaPlayer.PlaybackState.PlayingState
@@ -423,10 +483,13 @@ class PlayerWindow(QWidget):
             self.slider.setValue(ms)
         self.time_lbl.setText(f"{_clock(ms)} / {_clock(self.player.duration())}")
         self._follow(ms / 1000)
+        if self._fallback and self.aux.playbackState() == QMediaPlayer.PlaybackState.PlayingState \
+                and abs(self.aux.position() - ms) > 400:  # dua player bisa melenceng; tarik kembali
+            self.aux.setPosition(ms)
 
     def _released(self) -> None:
         self._seeking = False
-        self.player.setPosition(self.slider.value())
+        self._seek(self.slider.value())
 
     # --- who speaks when ---------------------------------------------------------------------------
     def load_who(self) -> None:
@@ -451,6 +514,7 @@ class PlayerWindow(QWidget):
         self.lines.setVisible(bool(self.turns))
         self.analyze_btn.setText("Analisis ulang" if self.speakers else "Analisis pembicara")
         self.text_btn.setText("Buat ulang transkrip" if self.turns else "Buat transkrip")
+        self.export_btn.setEnabled(bool(self.turns))
         if not self.speakers:
             self.now_lbl.setText("")
         self._who_buttons()
@@ -491,7 +555,7 @@ class PlayerWindow(QWidget):
                 self.lines.scrollToItem(self.lines.item(row), QListWidget.ScrollHint.PositionAtCenter)
 
     def _line_clicked(self, item: QListWidgetItem) -> None:
-        self.player.setPosition(max(0, int(item.data(Qt.ItemDataRole.UserRole) * 1000)))
+        self._seek(max(0, int(item.data(Qt.ItemDataRole.UserRole) * 1000)))
 
     def _ask_name(self, speaker: str, current: str) -> str | None:
         text, ok = QInputDialog.getText(self, "Nama pembicara", f"Nama untuk \"{speaker}\" (kosong = nama asli):", text=current)
@@ -505,6 +569,24 @@ class PlayerWindow(QWidget):
             return
         set_label(self.folder, speaker, name)
         self.load_who()
+
+    def export(self) -> None:
+        """Simpan transkrip ke berkas pilihan user; format ikut ekstensi."""
+        if not self.folder:
+            return
+        from .transcript import export_transcript
+
+        dest, _ = QFileDialog.getSaveFileName(self, "Ekspor transkrip",
+                                              str(self.folder / "transcript.md"),
+                                              "Markdown (*.md);;Teks (*.txt);;Subtitle SRT (*.srt)")
+        if not dest:
+            return
+        try:
+            path = export_transcript(self.folder, Path(dest))
+        except Exception as e:
+            self.set_status(f"Gagal ekspor: {e}", True)
+            return
+        self.set_status(f"Transkrip diekspor ke {path}")
 
     def _run_job(self, fn, busy_text: str, ok_text: str) -> None:
         if not self.folder or (self._job and self._job.isRunning()):
@@ -567,6 +649,8 @@ class PlayerWindow(QWidget):
 
     # --- audio tracks ------------------------------------------------------------------------------
     def _fill_tracks(self) -> None:
+        if self._fallback:  # video.mp4 tidak punya audio: combo tetap satu baris
+            return
         metas = self.player.audioTracks()
         self.tracks.blockSignals(True)
         self.tracks.clear()
@@ -590,6 +674,7 @@ class PlayerWindow(QWidget):
     def closeEvent(self, e) -> None:
         self._closed = True  # a running analysis keeps writing its files; nobody waits for it
         self.player.stop()
+        self.aux.stop()
         if self._builder:
             self._builder.wait(5000)
         super().closeEvent(e)

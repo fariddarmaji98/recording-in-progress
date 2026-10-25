@@ -13,5 +13,8 @@ imageio-ffmpeg
 catap
 pyobjc-framework-Quartz
 
+[:sys_platform == "linux"]
+python-xlib
+
 [transcribe]
 faster-whisper

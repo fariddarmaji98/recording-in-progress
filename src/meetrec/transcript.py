@@ -14,7 +14,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Callable
 
-from .merge import Turn, build_turns, to_markdown
+from .merge import Turn, build_turns, fmt_time, to_markdown
 from .remoteasr import pick_transcriber
 from .speakerdata import DEFAULT_THRESHOLD
 
@@ -115,4 +115,40 @@ def build_transcript(folder: Path, language: str | None = "id", model: str = "sm
     out.write_text(to_markdown(turns), encoding="utf-8")
     say(f"{len(turns)} baris transkrip ditulis ke transcript.md", 100)
     return out
+
+
+def export_transcript(folder: Path, dest: Path) -> Path:
+    """Tulis transkrip rekaman ke berkas pilihan user, format dari ekstensi tujuan.
+
+    `.srt` = subtitle (nama pembicara ikut di teks), `.txt` = teks saja,
+    sisanya `.md` = `menit.detik: teks` seperti transcript.md. Sumbernya
+    `transcript.json` karena hanya berkas itu yang menyimpan waktu tiap baris.
+    """
+    from .speakerdata import load_transcript
+
+    turns = load_transcript(Path(folder)) or []
+    if not turns:
+        raise FileNotFoundError("rekaman ini belum punya transkrip")
+    dest = Path(dest)
+    suffix = dest.suffix.lower()
+    if suffix == ".srt":
+        body = "\n".join(_srt_block(n, t) for n, t in enumerate(turns, start=1))
+    elif suffix == ".txt":
+        body = "\n".join(t["text"] for t in turns) + "\n"
+    else:
+        body = "".join(f"{fmt_time(t['start'])}: {t['text']}\n" for t in turns)
+    dest.write_text(body, encoding="utf-8")
+    return dest
+
+
+def _srt_block(n: int, turn: dict) -> str:
+    return f"{n}\n{_srt_ts(turn['start'])} --> {_srt_ts(turn['end'])}\n{turn['text']}\n"
+
+
+def _srt_ts(sec: float) -> str:
+    ms = max(0, int(sec * 1000))
+    hours, ms = divmod(ms, 3_600_000)
+    minutes, ms = divmod(ms, 60_000)
+    seconds, ms = divmod(ms, 1000)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{ms:03d}"
 

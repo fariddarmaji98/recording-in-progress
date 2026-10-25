@@ -27,6 +27,17 @@ lewat diarization. Di zona overlap antar peserta remote, potongan masing-masing 
 (klip `_overlaps/` menandai zonanya). Pemisahan suara sungguhan (speech separation) belum ada.
 Pakai headphone supaya suara lawan bicara tidak ikut masuk `mic.wav`.
 
+**Ekspor transkrip.** Tombol **Ekspor…** di player menyimpan transkrip ke berkas pilihanmu; formatnya ikut
+ekstensi: `.md` (`<menit>.<detik>: teks`, sama dengan `transcript.md`), `.txt` (teks saja), atau `.srt`
+(subtitle dengan waktu per baris, siap diunggah ke YouTube/editor video). Sumbernya `transcript.json`,
+jadi baris yang sudah ada di layar itulah yang ditulis — tanpa memanggil ASR ulang.
+
+**Kalau `full.mp4` gagal dibuat.** Player tidak mati di situ: video asli diputar tanpa suara dan suaranya
+diambil dari `mix.wav` yang dicampur dari `mic.wav` + `system.wav` (detik-an, bukan menit). Pilihan track
+audio dikunci di mode ini karena hanya `full.mp4` yang punya tiga track; tombol **Generate full media**
+tetap bisa dicoba lagi. Build juga tidak pernah lagi meninggalkan berkas setengah jadi: ffmpeg menulis ke
+`full.part.mp4` lalu berkas itu baru diganti nama setelah ffmpeg keluar tanpa error.
+
 ## Pengaturan: General, Cloud, dan MCP
 
 Tombol ⚙ membuka jendela Pengaturan dengan **menu di kiri** (sidebar) dan halaman di kanan. Menu baru tinggal ditambah dengan `SidebarPages.add_page`.

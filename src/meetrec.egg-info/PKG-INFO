@@ -15,5 +15,6 @@ Requires-Dist: av<17
 Requires-Dist: imageio-ffmpeg
 Requires-Dist: catap; sys_platform == "darwin"
 Requires-Dist: pyobjc-framework-Quartz; sys_platform == "darwin"
+Requires-Dist: python-xlib; sys_platform == "linux"
 Provides-Extra: transcribe
 Requires-Dist: faster-whisper; extra == "transcribe"
