@@ -159,6 +159,18 @@ def set_server_model(model: str, base: str | None = None) -> dict:
     return _json(req)
 
 
+def set_server_verbatim(on: bool, base: str | None = None) -> dict:
+    """Cara transkrip di server (`PATCH /config`): True = apa adanya, semua kata ikut.
+
+    Default server memakai VAD + ambang bawaan Whisper yang membuang bagian
+    dianggap derau — kalimat pendek dan suara jauh sering ikut hilang.
+    """
+    url = f"{(base or DEFAULT_BASE).rstrip('/')}/config"
+    req = urllib.request.Request(url, data=json.dumps({"verbatim": bool(on)}).encode(), method="PATCH",
+                                 headers={"Content-Type": "application/json"})
+    return _json(req)
+
+
 def pick_transcriber(base: str | None = None):
     """Satu backend untuk SEMUA track (mic + system), dipilih sekali di awal.
 

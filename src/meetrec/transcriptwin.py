@@ -14,8 +14,8 @@ from typing import Callable
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import (QComboBox, QDialog, QHBoxLayout, QLabel, QPlainTextEdit, QProgressBar,
-                               QPushButton, QVBoxLayout)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QPlainTextEdit,
+                               QProgressBar, QPushButton, QVBoxLayout)
 
 from .job import Job
 
@@ -34,6 +34,8 @@ QPlainTextEdit { background: #0f1218; color: #cfd5e3; border: 1px solid #2c3242;
 QComboBox { background: #1c2029; color: #e8ebf2; border: 1px solid #2c3242; border-radius: 7px; padding: 4px 8px; }
 QComboBox:disabled { color: #6f7890; }
 QComboBox QAbstractItemView { background: #1c2029; color: #e8ebf2; selection-background-color: #2a3350; }
+QCheckBox { color: #cfd5e3; font-size: 12px; }
+QCheckBox:disabled { color: #6f7890; }
 QPushButton { background: #2a3040; border: none; border-radius: 8px; padding: 6px 14px; color: #e8ebf2; }
 QPushButton:hover { background: #384058; }
 QPushButton#go { background: #4a6cf7; font-weight: 600; }
@@ -78,7 +80,6 @@ class TranskripWindow(QDialog):
         self.lang = QComboBox()
         self.engine = QComboBox()
         self.phase = QLabel("belum mulai — belum ada yang diunggah", objectName="phase")
-        self._fill_choices()
 
         form = QHBoxLayout()
         form.setSpacing(8)
@@ -97,6 +98,12 @@ class TranskripWindow(QDialog):
         tail.addWidget(self.go)
         form.addLayout(tail)
         lay.addLayout(form)
+
+        self.verbatim = QCheckBox("Apa adanya — jangan buang kata")
+        self.verbatim.setToolTip("Mematikan VAD dan ambang buang segmen di server: kalimat pendek dan suara "
+                                 "jauh ikut tertulis. Harganya lebih banyak salah dengar di bagian sunyi.")
+        lay.addWidget(self.verbatim)
+        self._fill_choices()
 
         self.bar = QProgressBar()
         self.bar.setRange(0, 100)
@@ -128,6 +135,8 @@ class TranskripWindow(QDialog):
 
         opts = server_options() or {}
         self._server_model = opts.get("model") or ""
+        self._server_verbatim = bool(opts.get("verbatim"))
+        self.verbatim.setChecked(self._server_verbatim)
         langs = [(str(x.get("label") or x["id"]), x["id"]) for x in opts.get("languages") or [] if "id" in x] \
             or FALLBACK_LANGS
         if not any(code is None for _, code in langs):
@@ -161,14 +170,16 @@ class TranskripWindow(QDialog):
         if self.job and self.job.isRunning():
             return
         lang, engine = self.lang.currentData(), self.engine.currentData()
-        for w in (self.lang, self.engine, self.go):
+        self._asked_verbatim = self.verbatim.isChecked()  # dibaca thread job, bukan widget-nya
+        for w in (self.lang, self.engine, self.verbatim, self.go):
             w.setEnabled(False)
         self.go.setText("Berjalan…")
         self.log.clear()
         self.bar.setValue(0)
         self.bar.setStyleSheet("")
         self.phase.setText("mulai…")
-        self.log.appendPlainText(f"setelan: bahasa={self.lang.currentText()}  mesin={self.engine.currentText()}")
+        self.log.appendPlainText(f"setelan: bahasa={self.lang.currentText()}  mesin={self.engine.currentText()}"
+                                 f"  {'apa adanya' if self.verbatim.isChecked() else 'rapi (VAD aktif)'}")
         self.job = Job(lambda: self._work(lang, engine))
         self.job.done.connect(self._finished)
         self.job.start()
@@ -187,6 +198,14 @@ class TranskripWindow(QDialog):
                     remoteasr.set_server_model(model)
                 except RuntimeError as e:
                     raise RuntimeError(f"tidak bisa memakai {model}: {e}") from None
+            verbatim = self._asked_verbatim
+            if verbatim != self._server_verbatim:
+                self._emit({"text": f"cara transkrip server → {'apa adanya' if verbatim else 'rapi'}", "pct": 2})
+                try:
+                    remoteasr.set_server_verbatim(verbatim)
+                except RuntimeError as e:
+                    raise RuntimeError(f"tidak bisa mengubah cara transkrip: {e}") from None
+                self._server_verbatim = verbatim  # Mulai ulang tidak mengirim ulang
             transcribe = remoteasr.pick_transcriber()
         build_transcript(self.folder, lang, transcribe=transcribe, on_event=self._emit)
 
@@ -205,7 +224,7 @@ class TranskripWindow(QDialog):
     def _finished(self, err: str) -> None:
         if self._closed:
             return
-        for w in (self.lang, self.engine, self.go):
+        for w in (self.lang, self.engine, self.verbatim, self.go):
             w.setEnabled(True)
         self.go.setText("Mulai ulang" if err else "Mulai")
         if err:
