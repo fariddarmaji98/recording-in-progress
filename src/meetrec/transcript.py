@@ -38,7 +38,10 @@ def transcript_turns(folder: Path, transcribe: Callable, language: str | None = 
         def relay(ev: dict) -> None:
             on_event({"text": f"{media.name}: {ev['text']}", "pct": ev.get("pct")})
 
-    words = _shift(transcribe(media, language, model, on_event=relay), t_start)
+    extra = {}
+    if getattr(transcribe, "segment_level", False):  # backend HTTP: satu kartu arsip per rekaman
+        extra = {"recording_id": _saved_id(folder), "on_uploaded": lambda rid: _save_id(folder, rid)}
+    words = _shift(transcribe(media, language, model, on_event=relay, **extra), t_start)
     if getattr(transcribe, "segment_level", False):
         # server sudah memotong per kalimat: satu segmen = satu baris, jangan digabung lagi
         return [Turn("Mix", w.start, w.end, w.text) for w in words]
@@ -66,6 +69,27 @@ def _media_to_upload(folder: Path, on_event: Callable | None) -> tuple[Path, flo
 
 def _shift(words: list, by: float) -> list:
     return [type(w)(w.text, w.start + by, w.end + by) for w in words]
+
+
+def _id_file(folder: Path) -> Path:
+    return Path(folder) / ".transkrip.json"
+
+
+def _saved_id(folder: Path) -> int | None:
+    """Id rekaman server untuk folder ini, kalau pernah diunggah.
+
+    Sidecar kecil, bukan berkas arsip: satu baris `{"recording_id": N}`. Tanpa ini
+    setiap tekan Mulai mengunggah ulang dan server membuat kartu baru — satu
+    meeting jadi banyak kartu riwayat dengan judul sama.
+    """
+    try:
+        return int(json.loads(_id_file(folder).read_text(encoding="utf-8"))["recording_id"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def _save_id(folder: Path, rid: int) -> None:
+    _id_file(folder).write_text(json.dumps({"recording_id": int(rid)}), encoding="utf-8")
 
 
 def build_transcript(folder: Path, language: str | None = "id", model: str = "small", speakers: int = -1,

@@ -23,13 +23,19 @@ POLL_S = 0.5  # cukup rapat untuk terasa "langsung", cukup jarang untuk tidak me
 
 
 def transcribe(wav: str | Path, language: str | None = "id", model: str | None = None,
-               base: str | None = None, timeout: float = 3600.0, on_event=None) -> list[Word]:
+               base: str | None = None, timeout: float = 3600.0, on_event=None,
+               recording_id: int | None = None, on_uploaded=None) -> list[Word]:
     """Unggah → minta transkrip → ikuti log server → ambil segmen. `model` diabaikan.
+
+    `recording_id` = rekaman yang SUDAH ada di arsip untuk berkas ini: tidak
+    diunggah ulang, hanya diminta transkripnya lagi. Jadi menekan Mulai dua kali
+    tidak menumpuk kartu duplikat di server.
 
     `on_event({"text", "pct"})` dipanggil setiap ada langkah baru: baris dari server
     (lewat `GET /recordings/{id}/progress`) dan langkah yang terjadi di sisi ini
     (mengunggah, meminta transkrip). Dipakai jendela progres, jadi bentuknya sama
-    untuk semua sumber.
+    untuk semua sumber. `on_uploaded(recording_id)` memberitahu id hasil unggahan
+    supaya pemanggil bisa menyimpannya untuk putaran berikutnya.
     """
     def say(text: str, pct: int | None = None) -> None:
         if on_event:
@@ -37,14 +43,30 @@ def transcribe(wav: str | Path, language: str | None = "id", model: str | None =
 
     base = (base or DEFAULT_BASE).rstrip("/")
     path = Path(wav)
-    say(f"mengunggah {path.name} ({path.stat().st_size / 1e6:.1f} MB)", 2)
-    up = _upload(f"{base}/recordings", path, language or "auto")
-    rid = up["recording"]["id"]
-    say(f"server menerima sebagai rekaman #{rid}", 4)
-    _post(f"{base}/recordings/{rid}/transcribe")
+    rid = recording_id
+    if rid:
+        say(f"memakai rekaman #{rid} yang sudah ada di arsip transkrip", 2)
+    else:
+        say(f"mengunggah {path.name} ({path.stat().st_size / 1e6:.1f} MB)", 2)
+        up = _upload(f"{base}/recordings", path, language or "auto")
+        rid = up["recording"]["id"]
+        say(f"server menerima sebagai rekaman #{rid}", 4)
+        if on_uploaded:
+            on_uploaded(rid)
+    try:
+        _post(f"{base}/recordings/{rid}/transcribe")
+    except RuntimeError as e:
+        if recording_id and "HTTP 404" in str(e):  # kartunya sudah dihapus di server
+            say("rekaman lama tidak ada lagi — mengunggah ulang", 2)
+            return transcribe(wav, language, model, base=base, timeout=timeout, on_event=on_event,
+                              on_uploaded=on_uploaded)
+        raise
     say("menjalankan transkrip di server", 5)
 
     seq = 0
+    if recording_id:  # pakai ulang: lewati log job lama, mulai dari baris baru
+        old = _get(f"{base}/recordings/{rid}/progress?since=0")
+        seq = max((e["seq"] for e in old.get("events") or []), default=-1) + 1
     deadline = time.monotonic() + timeout
     while True:
         d = _get(f"{base}/recordings/{rid}/progress?since={seq}")
@@ -146,8 +168,9 @@ def pick_transcriber(base: str | None = None):
     from . import asr
 
     if reachable(base):
-        def remote(path, language="id", model="small", on_event=None):
-            return transcribe(path, language, base=base, on_event=on_event)
+        def remote(path, language="id", model="small", on_event=None, recording_id=None, on_uploaded=None):
+            return transcribe(path, language, base=base, on_event=on_event,
+                              recording_id=recording_id, on_uploaded=on_uploaded)
         remote.segment_level = True  # satu Word = satu kalimat dari server
         return remote
 
