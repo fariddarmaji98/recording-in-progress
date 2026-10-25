@@ -44,6 +44,9 @@ def transcribe(wav: str | Path, language: str | None = "id", model: str | None =
     base = (base or DEFAULT_BASE).rstrip("/")
     path = Path(wav)
     rid = recording_id
+    if rid and not _is_ours(base, rid, path):
+        say(f"rekaman #{rid} di arsip bukan untuk berkas ini — mengunggah ulang", 2)
+        rid = recording_id = None
     if rid:
         say(f"memakai rekaman #{rid} yang sudah ada di arsip transkrip", 2)
     else:
@@ -116,6 +119,21 @@ def _post(url: str) -> dict:
     return _json(urllib.request.Request(url, data=b"", method="POST"))
 
 
+def _is_ours(base: str, rid: int, path: Path) -> bool:
+    """Benarkah rekaman #rid itu milik berkas ini?
+
+    Id arsip bisa dipakai ulang: rekaman lama dihapus, id 9 yang sama kemudian
+    ditempati unduhan lain. Tanpa cek, transkrip meeting bisa ditimpa teks video
+    yang sama sekali berbeda. Unggahan memberi `title` = nama folder induk, jadi
+    judul itulah tanda pengenalnya.
+    """
+    try:
+        got = _get(f"{base}/recordings/{rid}")
+    except RuntimeError:
+        return False  # 404: kartunya sudah tidak ada
+    return (got.get("title") or "") == path.parent.name
+
+
 def _json(req: urllib.request.Request) -> dict:
     try:
         with urllib.request.urlopen(req, timeout=120) as r:
@@ -124,7 +142,8 @@ def _json(req: urllib.request.Request) -> dict:
         raise RuntimeError(f"{req.full_url}: HTTP {e.code} {e.read()[:200].decode(errors='replace')}") from None
     except urllib.error.URLError as e:
         raise BackendDown(f"repo transkrip tidak bisa dihubungi ({req.full_url}): {e.reason} — "
-                          "jalankan backend ultraman-transkrip atau set MEETREC_TRANSKRIP_URL") from None
+                          "jalankan backend ultraman-transkrip, tunggu kalau server baru di-restart, "
+                          "atau set MEETREC_TRANSKRIP_URL") from None
 
 
 class BackendDown(RuntimeError):
