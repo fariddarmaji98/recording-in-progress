@@ -120,6 +120,90 @@ class _WavThread(_Track, threading.Thread):
             self.ready.set()
 
 
+class _MicFallback:
+    """Mic device with a PortAudio second path.
+
+    On this box `soundcard` cannot open the USB mic at all: WASAPI reports the
+    device's mix format as plain PCM/float instead of WAVE_FORMAT_EXTENSIBLE, and
+    soundcard asserts on that (`AssertionError` with no message, so the window only
+    says "mic: "). PortAudio talks WASAPI to the same device without complaint, so
+    the read loop asks this wrapper for a recorder and gets whichever engine works.
+    """
+
+    def __init__(self, name: str | None):
+        import soundcard as sc
+
+        self._sc = sc.get_microphone(name) if name else sc.default_microphone()
+
+    @property
+    def name(self) -> str:
+        return self._sc.name
+
+    def recorder(self, samplerate: int, channels=None):
+        try:
+            return self._sc.recorder(samplerate=samplerate, channels=channels)
+        except AssertionError:
+            return _pa_recorder(self._sc.name, samplerate)
+
+
+# picked from PortAudio: `_pa_recorder` needs the device index, not a soundcard object
+def _pa_device(name: str) -> int:
+    import sounddevice as sd
+
+    apis = sd.query_hostapis()
+    wanted = name.split("(")[1].split(")")[0] if "(" in name else name
+    cands = [i for i, d in enumerate(sd.query_devices())
+             if d["max_input_channels"] > 0 and apis[d["hostapi"]]["name"].endswith("WASAPI")]
+    for i in cands:
+        if wanted.lower() in sd.query_devices(i)["name"].lower():
+            return i
+    if cands:
+        return apis[[a["name"] for a in apis].index("Windows WASAPI")]["default_input_device"]
+    raise RuntimeError(f"tidak ada input WASAPI untuk {name}")
+
+
+class _pa_recorder:
+    """One recording session on a PortAudio device, resampled to `rate`."""
+
+    def __init__(self, name: str, rate: int):
+        import sounddevice as sd
+
+        self._sd, self.rate = sd, rate
+        self.index = _pa_device(name)
+        self.src_rate = int(sd.query_devices(self.index)["default_samplerate"])
+        self.native = sd.query_devices(self.index)["name"]
+        self._rs = None
+        self._stream = None
+
+    def __enter__(self):
+        self._stream = self._sd.InputStream(device=self.index, channels=1, samplerate=self.src_rate,
+                                            dtype="float32", blocksize=max(1, self.src_rate // 10))
+        self._stream.start()
+        if self.src_rate != self.rate:
+            import soxr
+            self._rs = soxr.ResampleStream(self.src_rate, self.rate, 1, dtype="float32")
+        return self
+
+    def record(self, numframes: int):
+        import numpy as np
+
+        need = numframes if self._rs is None else int(round(numframes * self.src_rate / self.rate))
+        block, _ = self._stream.read(need)
+        mono = block.mean(axis=1) if block.ndim == 2 else block
+        if self._rs is not None:
+            mono = self._rs.resample_chunk(mono)
+        if len(mono) != numframes:  # pembulatan resampler: rapikan ke panjang blok
+            mono = np.resize(mono, numframes)
+        return mono.reshape(-1, 1)
+
+    def __exit__(self, *exc):
+        if self._stream is not None:
+            self._stream.stop()
+            self._stream.close()
+            self._stream = None
+        return False
+
+
 class _TapWriter(_Track):
     """macOS: receives Core Audio tap buffers (interleaved PCM) and writes the same wav format."""
 
@@ -190,8 +274,7 @@ class Session:
 
     # --- device pickers -------------------------------------------------
     def _open_mic(self):
-        import soundcard as sc
-        return sc.get_microphone(self.mic_name) if self.mic_name else sc.default_microphone()
+        return _MicFallback(self.mic_name)
 
     def _open_loopback(self):
         import soundcard as sc
