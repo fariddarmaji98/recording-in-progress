@@ -62,6 +62,7 @@ class _Builder(QThread):
     """Builds full.mp4 off the UI thread."""
 
     done = Signal(str, str)  # error text ("" = ok), path
+    progress = Signal(int)   # persentase, supaya layar tidak tampak macet
 
     def __init__(self, folder: Path):
         super().__init__()
@@ -69,9 +70,12 @@ class _Builder(QThread):
 
     def run(self):
         try:
-            self.done.emit("", str(build_full_media(self.folder)))
+            self.done.emit("", str(build_full_media(self.folder, on_progress=self._pct)))
         except Exception as e:
             self.done.emit(str(e), "")
+
+    def _pct(self, frac: float) -> None:
+        self.progress.emit(int(frac * 100))
 
 
 # --- who speaks when -------------------------------------------------------------------------------
@@ -394,6 +398,8 @@ class PlayerWindow(QWidget):
         self.set_status("Membuat full media… (file asli tidak diubah)")
         self._builder = _Builder(self.folder)
         self._builder.done.connect(self._built)
+        self._builder.progress.connect(
+            lambda pct: self.set_status(f"Membuat full media… {pct}% (file asli tidak diubah)"))
         self._builder.start()
 
     def _built(self, err: str, path: str) -> None:

@@ -10,6 +10,7 @@ import json
 import os
 import shutil
 import subprocess
+import wave
 from pathlib import Path
 
 
@@ -48,13 +49,33 @@ def timeline_start(folder: Path) -> float:
     return min([float((meta.get("video") or {}).get("offset_sec") or 0.0)] + starts)
 
 
-def _run(cmd: list[str], out: Path) -> None:
-    """Run ffmpeg onto `out.part.<ext>`, then rename: build yang terbunuh tidak pernah tampak jadi."""
+def _run(cmd: list[str], out: Path, total: float | None = None, on_progress=None) -> None:
+    """Run ffmpeg onto `out.part.<ext>`, then rename: build yang terbunuh tidak pernah tampak jadi.
+
+    `total` (detik) + `on_progress(fraksi)`: ffmpeg diminta menulis progres mesin
+    (`-progress pipe:1`), supaya jendela bisa menampilkan persentase. Tanpa itu
+    penggabungan rekaman panjang tampak seperti macet: layar diam bermenit-menit.
+    """
     part = out.with_name(f"{out.stem}.part{out.suffix}")  # ekstensi tetap: ffmpeg memilih muxer dari situ
-    r = subprocess.run(cmd + [str(part)], capture_output=True, text=True, encoding="utf-8", errors="replace")
-    if r.returncode != 0:
+    part.unlink(missing_ok=True)  # sisa build yang terbunuh tidak boleh tampak seperti hasil
+    if not (total and on_progress):
+        r = subprocess.run(cmd + [str(part)], capture_output=True, text=True, encoding="utf-8", errors="replace")
+        stderr, code = r.stderr, r.returncode
+    else:
+        cmd = [cmd[0], "-progress", "pipe:1", "-nostats"] + cmd[1:]
+        p = subprocess.Popen(cmd + [str(part)], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, encoding="utf-8", errors="replace")
+        for line in p.stdout:
+            if line.startswith("out_time_us=") or line.startswith("out_time_ms="):
+                try:
+                    done = int(line.split("=", 1)[1]) / 1e6
+                except ValueError:
+                    continue
+                on_progress(min(0.99, max(0.0, done / total)))
+        stderr, code = p.stderr.read(), p.wait()
+    if code != 0:
         part.unlink(missing_ok=True)
-        detail = " ".join(r.stderr.split())[:500] or f"ffmpeg keluar dengan kode {r.returncode}"
+        detail = " ".join(stderr.split())[:500] or f"ffmpeg keluar dengan kode {code}"
         raise RuntimeError(detail)
     os.replace(part, out)
 
@@ -90,7 +111,17 @@ def build_mix_wav(folder: Path, out_name: str = "mix.wav") -> Path:
     return out
 
 
-def build_full_media(folder: Path, out_name: str = "full.mp4") -> Path:
+def _wav_sec(path: Path) -> float:
+    """Durasi wav tanpa ffprobe: 44-byte header standar, 16-bit mono."""
+    try:
+        with wave.open(str(path)) as w:
+            return w.getnframes() / w.getframerate()
+    except Exception:  # noqa: BLE001 — durasi cuma untuk persentase
+        return 0.0
+
+
+def build_full_media(folder: Path, out_name: str = "full.mp4", on_progress=None) -> Path:
+    """Gabung video + audio jadi full.mp4. `on_progress(fraksi)` = persentase ffmpeg."""
     folder = Path(folder)
     meta_file = folder / "meta.json"
     meta = json.loads(meta_file.read_text(encoding="utf-8")) if meta_file.exists() else {}
@@ -132,5 +163,7 @@ def build_full_media(folder: Path, out_name: str = "full.mp4") -> Path:
     out = folder / out_name
     cmd += ["-movflags", "+faststart", "-nostdin"]
 
-    _run(cmd, out)
+    # output berakhir di track terpanjang (amix duration=longest), bukan di video
+    total = max([float(meta.get("duration_sec") or 0.0)] + [_wav_sec(a[2]) for a in audio])
+    _run(cmd, out, total=total, on_progress=on_progress)
     return out
