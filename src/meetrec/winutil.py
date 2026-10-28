@@ -1,12 +1,19 @@
 """Keep the floating panel out of screen recordings, where the OS lets us."""
 from __future__ import annotations
 
+import os
 import sys
 
 
 def exclude_from_capture(widget) -> bool:
     """macOS: window sharing type none. Windows: WDA_EXCLUDEFROMCAPTURE (Windows 10 2004+).
-    Linux has no equivalent, so the panel stays visible in the video there."""
+    Linux has no equivalent, so the panel stays visible in the video there.
+
+    `MEETREC_CAPTURE_VISIBLE=1` membalik niatnya: panel TIDAK disembunyikan dari tangkapan
+    layar, jadi orang lain di Zoom/Meet ikut melihat panelnya (dipakai launcher mode share).
+    """
+    if os.environ.get("MEETREC_CAPTURE_VISIBLE", "").strip() not in ("", "0", "false", "False"):
+        return False
     try:
         from PySide6.QtGui import QGuiApplication
 
