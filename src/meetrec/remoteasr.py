@@ -1,8 +1,9 @@
 """Transkrip lewat repo ultraman-transkrip (backend FastAPI) — bukan faster-whisper lokal.
 
 Alurnya: unggah wav ke `POST {base}/recordings`, tunggu job transkrip, ambil `segments` dari
-`GET {base}/recordings/{id}`. `base` default `http://127.0.0.1:8000/api`, bisa ditimpa dengan
-env `MEETREC_TRANSKRIP_URL`. Rekaman tetap tersimpan di repo itu (jadi arsipnya juga).
+`GET {base}/recordings/{id}`. `base` dicari berurutan (lihat `default_base`): env `MEETREC_TRANSKRIP_URL`,
+lalu host dari URL MCP di Pengaturan > MCP (REST ada di host yang sama, port 8000), lalu `http://127.0.0.1:8000/api`.
+Rekaman tetap tersimpan di repo itu (jadi arsipnya juga).
 
 Repo mengembalikan segmen per kalimat, bukan per kata — satu segmen jadi satu `Word` dengan
 rentang waktunya. Cukup untuk giliran pembicara, tapi zona overlap ditandai per kalimat.
@@ -18,8 +19,48 @@ from pathlib import Path
 
 from .asr import Word
 
-DEFAULT_BASE = os.environ.get("MEETREC_TRANSKRIP_URL", "http://127.0.0.1:8000/api")
+DEFAULT_BASE = "http://127.0.0.1:8000/api"
+REST_PORT = 8000  # REST (/api) dan MCP (:8100/mcp) dijalankan repo yang sama, di host yang sama
+MCP_SETTING = "mcp/transkrip/url"  # kunci QSettings yang diisi halaman Pengaturan > MCP
 POLL_S = 0.5  # cukup rapat untuk terasa "langsung", cukup jarang untuk tidak membebani server
+
+
+def base_from_mcp_url(mcp_url: str) -> str | None:
+    """`http://100.101.14.66:8100/mcp` -> `http://100.101.14.66:8000/api` (host dan skema sama, port REST).
+
+    None kalau URL-nya tidak bisa dibaca sebagai alamat http(s) dengan host.
+    """
+    from urllib.parse import urlsplit
+
+    try:
+        u = urlsplit(mcp_url.strip())
+        host = u.hostname
+    except ValueError:
+        return None
+    if u.scheme not in ("http", "https") or not host:
+        return None
+    host = f"[{host}]" if ":" in host else host  # IPv6 harus berkurung siku di URL
+    return f"{u.scheme}://{host}:{REST_PORT}/api"
+
+
+def default_base() -> str:
+    """Alamat REST yang dipakai bila pemanggil tidak memberi `base`.
+
+    Env `MEETREC_TRANSKRIP_URL` menang (penimpaan eksplisit). Berikutnya host dari URL MCP yang diisi di
+    Pengaturan > MCP, jadi server transkrip di mesin lain (mis. lewat Tailscale) ikut terbaca untuk daftar
+    model, bahasa, dan unggahan — bukan hanya untuk MCP. Terakhir `127.0.0.1`. Dibaca tiap panggilan,
+    jadi mengubah URL di Pengaturan langsung berlaku.
+    """
+    env = os.environ.get("MEETREC_TRANSKRIP_URL")
+    if env:
+        return env
+    try:
+        from PySide6.QtCore import QSettings
+
+        mcp_url = str(QSettings("meetrec", "meetrec").value(MCP_SETTING, "") or "")
+    except Exception:  # noqa: BLE001 — tanpa Qt (CLI minimal) atau setelan tak terbaca: pakai bawaan
+        mcp_url = ""
+    return (base_from_mcp_url(mcp_url) if mcp_url else None) or DEFAULT_BASE
 
 
 def transcribe(wav: str | Path, language: str | None = "id", model: str | None = None,
@@ -41,7 +82,7 @@ def transcribe(wav: str | Path, language: str | None = "id", model: str | None =
         if on_event:
             on_event({"text": text, "pct": pct})
 
-    base = (base or DEFAULT_BASE).rstrip("/")
+    base = (base or default_base()).rstrip("/")
     path = Path(wav)
     rid = recording_id
     if rid and not _is_ours(base, rid, path):
@@ -143,7 +184,7 @@ def _json(req: urllib.request.Request) -> dict:
     except urllib.error.URLError as e:
         raise BackendDown(f"repo transkrip tidak bisa dihubungi ({req.full_url}): {e.reason} — "
                           "jalankan backend ultraman-transkrip, tunggu kalau server baru di-restart, "
-                          "atau set MEETREC_TRANSKRIP_URL") from None
+                          "cek URL di Pengaturan > MCP, atau set MEETREC_TRANSKRIP_URL") from None
 
 
 class BackendDown(RuntimeError):
@@ -151,7 +192,7 @@ class BackendDown(RuntimeError):
 
 
 def reachable(base: str | None = None) -> bool:
-    base = (base or DEFAULT_BASE).rstrip("/")
+    base = (base or default_base()).rstrip("/")
     try:
         urllib.request.urlopen(f"{base}/health", timeout=2).close()
         return True
@@ -165,14 +206,14 @@ def server_options(base: str | None = None) -> dict | None:
     `None` = server tidak menjawab; pemanggil memakai daftar bawaannya sendiri.
     """
     try:
-        return _get(f"{(base or DEFAULT_BASE).rstrip('/')}/config")
+        return _get(f"{(base or default_base()).rstrip('/')}/config")
     except Exception:  # noqa: BLE001 — isi dropdown tidak boleh menggagalkan jendela
         return None
 
 
 def set_server_model(model: str, base: str | None = None) -> dict:
     """Ganti model lokal server (`PATCH /config`). 409 kalau ada transkrip berjalan."""
-    url = f"{(base or DEFAULT_BASE).rstrip('/')}/config"
+    url = f"{(base or default_base()).rstrip('/')}/config"
     req = urllib.request.Request(url, data=json.dumps({"model": model}).encode(), method="PATCH",
                                  headers={"Content-Type": "application/json"})
     return _json(req)
@@ -184,7 +225,7 @@ def set_server_verbatim(on: bool, base: str | None = None) -> dict:
     Default server memakai VAD + ambang bawaan Whisper yang membuang bagian
     dianggap derau — kalimat pendek dan suara jauh sering ikut hilang.
     """
-    url = f"{(base or DEFAULT_BASE).rstrip('/')}/config"
+    url = f"{(base or default_base()).rstrip('/')}/config"
     req = urllib.request.Request(url, data=json.dumps({"verbatim": bool(on)}).encode(), method="PATCH",
                                  headers={"Content-Type": "application/json"})
     return _json(req)
@@ -211,7 +252,7 @@ def pick_transcriber(base: str | None = None):
         try:
             return asr.transcribe(wav, language, model)
         except ImportError:
-            raise SystemExit(f"repo transkrip tidak jalan di {base or DEFAULT_BASE} dan faster-whisper "
+            raise SystemExit(f"repo transkrip tidak jalan di {base or default_base()} dan faster-whisper "
                              "tidak terpasang: jalankan backend ultraman-transkrip") from None
     local.segment_level = False  # word-level: perlu digabung jadi giliran
     return local
