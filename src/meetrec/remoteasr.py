@@ -148,7 +148,7 @@ def _multipart(path: Path, fields: dict[str, str]) -> tuple[bytes, str]:
 def _upload(url: str, path: Path, language: str) -> dict:
     body, ctype = _multipart(path, {"language": language, "title": path.parent.name})
     req = urllib.request.Request(url, data=body, headers={"Content-Type": ctype}, method="POST")
-    return _json(req)
+    return _json(req, timeout=1800)  # 265 MB lewat Tailscale relay bisa >2 menit; 120 dtk terlalu pendek
 
 
 def _get(url: str) -> dict:
@@ -175,9 +175,9 @@ def _is_ours(base: str, rid: int, path: Path) -> bool:
     return (got.get("title") or "") == path.parent.name
 
 
-def _json(req: urllib.request.Request) -> dict:
+def _json(req: urllib.request.Request, timeout: float = 120.0) -> dict:
     try:
-        with urllib.request.urlopen(req, timeout=120) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read() or b"{}")
     except urllib.error.HTTPError as e:
         raise RuntimeError(f"{req.full_url}: HTTP {e.code} {e.read()[:200].decode(errors='replace')}") from None
