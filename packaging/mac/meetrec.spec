@@ -9,7 +9,7 @@ ICON = os.environ.get("MEETREC_ICON") or None
 
 datas = collect_data_files("faster_whisper")  # silero VAD model used by the transcript
 binaries = []
-for pkg in ("sherpa_onnx", "ctranslate2", "onnxruntime", "av", "soundcard"):
+for pkg in ("sherpa_onnx", "ctranslate2", "onnxruntime", "av", "soundcard", "catap"):  # catap: libcatap_coreaudio.dylib
     binaries += collect_dynamic_libs(pkg)
 
 a = Analysis(

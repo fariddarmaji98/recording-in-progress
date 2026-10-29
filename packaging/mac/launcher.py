@@ -11,12 +11,19 @@ def selftest() -> int:
 
     problems = []
     for mod in ("meetrec.ui", "meetrec.player", "meetrec.timeline", "meetrec.transcript", "meetrec.fullmedia",
-                "meetrec.meetbridge", "PySide6.QtMultimedia", "PySide6.QtMultimediaWidgets", "sherpa_onnx", "soundcard",
+                "meetrec.meetbridge", "meetrec.mcpconn", "meetrec.remoteasr", "meetrec.transcriptwin", "meetrec.settings", "meetrec.upload",
+                "mcp", "mcp.client.streamable_http", "mcp.shared._httpx_utils", "PySide6.QtMultimedia", "PySide6.QtMultimediaWidgets", "sherpa_onnx", "soundcard",
                 "catap", "Quartz", "objc", "mss", "av", "soxr", "soundfile", "certifi", "numpy", "faster_whisper", "ctranslate2"):
         try:
             importlib.import_module(mod)
         except Exception as e:  # report every missing piece, not only the first
             problems.append(f"import {mod}: {e!r}")
+    try:
+        from meetrec.deps import find_problems
+
+        problems += [f"{x.name}: {x.detail}" for x in find_problems("ui")]  # includes catap's Core Audio dylib
+    except Exception as e:
+        problems.append(f"deps: {e!r}")
     try:
         import imageio_ffmpeg
 

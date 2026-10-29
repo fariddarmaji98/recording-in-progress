@@ -286,6 +286,12 @@ class Session:
         return [t for t in (self._mic, self._sys, self._tapw) if t]
 
     def start(self) -> None:
+        from .deps import DepsError, ensure
+
+        try:
+            ensure("record")  # installs what is missing (e.g. catap's Core Audio library) before any device opens
+        except DepsError as e:
+            raise RuntimeError(str(e)) from e
         self.dir.mkdir(parents=True, exist_ok=True)
         self.t0 = self.t0 or time.monotonic()  # the panel presets t0 so video and audio start together
         self.t0_wall = time.time() - (time.monotonic() - self.t0)  # same instant on the wall clock (Meet extension events)

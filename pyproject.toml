@@ -20,7 +20,7 @@ transcribe = ["faster-whisper"]
 meetrec = "meetrec.cli:main"
 
 [project.gui-scripts]
-meetrec-ui = "meetrec.ui:run"
+meetrec-ui = "meetrec.cli:main_ui"
 
 [tool.setuptools.packages.find]
 where = ["src"]

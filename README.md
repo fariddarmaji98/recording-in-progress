@@ -149,9 +149,21 @@ Tes JS: `cd extension && npm install && npm test`.
 ## Pasang
 
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install -e .
+scripts/setup.sh               # macOS / Linux: venv + semua dependency + pengecekan (tambah --transcribe untuk Whisper)
 ```
+
+Manual:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install --only-binary catap -e .
+```
+
+Dependency yang kurang dipasang otomatis: tiap perintah (`meetrec`, `record`, `player`, `timeline`, ...) dan tombol Mulai
+mengecek dulu, lalu menjalankan `pip install` untuk yang belum ada. Di macOS ini termasuk library Core Audio native milik
+`catap` (`libcatap_coreaudio.dylib`), yang hanya ada di wheel `catap`; kalau hilang, `catap` dipasang ulang dari wheel.
+Cek manual: `.venv/bin/meetrec doctor` (tambah `--fix` untuk memasang yang kurang). Aplikasi .app hasil PyInstaller tidak bisa
+memasang paket sendiri; di sana pengecekan hanya melaporkan apa yang kurang.
 
 Linux: butuh `libpulse` (PulseAudio atau `pipewire-pulse`). macOS: izinkan **Microphone** dan
 **Screen & System Audio Recording** untuk aplikasi terminal yang kamu pakai.

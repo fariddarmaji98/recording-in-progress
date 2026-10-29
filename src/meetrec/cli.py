@@ -92,10 +92,53 @@ def cmd_ui(_: argparse.Namespace) -> None:
     run()
 
 
+def _crash_log() -> None:
+    """A segfault leaves no Python traceback and macOS wrote no crash report for it: keep the stack in ~/.meetrec/crash.log."""
+    import faulthandler
+
+    try:
+        d = Path.home() / ".meetrec"
+        d.mkdir(exist_ok=True)
+        f = open(d / "crash.log", "a", buffering=1)
+        f.write(f"\n--- meetrec started {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+        faulthandler.enable(file=f, all_threads=True)
+    except OSError:
+        pass
+
+
+# What each command needs; `main` installs what is missing before the command's own imports run.
+NEEDS = {"cmd_ui": "ui", "cmd_record": "record", "cmd_devices": "record", "cmd_timeline": "analyze",
+         "cmd_split": "analyze", "cmd_transcribe": "transcribe", "cmd_player": "player", "cmd_fullmedia": "screen"}
+
+
+def _ensure(feature: str) -> None:
+    from .deps import DepsError, ensure
+
+    try:
+        ensure(feature, log=lambda m: print(m, flush=True))
+    except DepsError as e:
+        raise SystemExit(f"meetrec: {e}")
+
+
+def cmd_doctor(a: argparse.Namespace) -> None:
+    from .deps import doctor
+
+    raise SystemExit(doctor(a.fix))
+
+
+def main_ui() -> None:
+    """Entry point of `meetrec-ui` (no console): same as plain `meetrec`, with the dependency check first."""
+    _crash_log()
+    _ensure("ui")
+    cmd_ui(argparse.Namespace())
+
+
 def main() -> None:
     import sys
 
+    _crash_log()
     if len(sys.argv) == 1:
+        _ensure("ui")
         return cmd_ui(argparse.Namespace())  # plain `meetrec` opens the floating panel
     p = argparse.ArgumentParser(prog="meetrec")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -111,6 +154,10 @@ def main() -> None:
     f.set_defaults(fn=cmd_fullmedia)
 
     sub.add_parser("devices", help="daftar mikrofon dan speaker").set_defaults(fn=cmd_devices)
+
+    d = sub.add_parser("doctor", help="cek semua dependency; --fix memasang yang kurang")
+    d.add_argument("--fix", action="store_true", help="pasang otomatis yang kurang")
+    d.set_defaults(fn=cmd_doctor)
 
     r = sub.add_parser("record", help="rekam mic + suara sistem (dua file terpisah)")
     r.add_argument("-o", "--out", type=Path, default=DEFAULT_OUT, help=f"folder induk (default {DEFAULT_OUT})")
@@ -141,6 +188,8 @@ def main() -> None:
     x.set_defaults(fn=cmd_transcribe)
 
     a = p.parse_args()
+    if a.fn.__name__ in NEEDS:
+        _ensure(NEEDS[a.fn.__name__])
     a.fn(a)
 
 
